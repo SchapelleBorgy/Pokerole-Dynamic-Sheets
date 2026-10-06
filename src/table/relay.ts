@@ -19,6 +19,12 @@ export function relayConfigured(): boolean {
     return localOverride() !== null || !PRODUCTION_RELAY.includes('YOUR-SUBDOMAIN');
 }
 
+/* With no relay deployed the table still works: browsers connect to each other
+   directly (peerTransport.ts). A relay, once set, takes over. */
+export function peerToPeer(): boolean {
+    return !relayConfigured();
+}
+
 /* ========================================================================= */
 /*  LOCAL TESTING SEAM — safe to delete once the relay is deployed.          */
 /*                                                                           */
@@ -97,6 +103,7 @@ export function roomUrl(addr: string): string {
 /** True when a relay is reachable at all — used by the join screen to say
     "the relay is not answering" instead of failing silently later. */
 export async function relayReachable(): Promise<boolean> {
+    if (peerToPeer()) return true;
     const http = relayBase().replace(/^ws/, 'http');
     try {
         const ctrl = new AbortController();

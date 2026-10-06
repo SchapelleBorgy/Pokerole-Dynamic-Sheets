@@ -28,10 +28,11 @@ import { createHostIdentity, loadHostIdentity, memberIdentity } from './identity
 import type { Identity } from './identity';
 import { HEARTBEAT_MS, LIMITS, PRESENCE_TIMEOUT_MS, PROTOCOL_VERSION, randomId } from './protocol';
 import type { Body, Inner, WireMember, WireRoll } from './protocol';
-import { roomUrl } from './relay';
+import { peerToPeer, roomUrl } from './relay';
 import { fabricateD6, fabricateTotal } from './scripted';
 import { RelayTransport } from './transport';
-import type { TransportStatus } from './transport';
+import { PeerTransport } from './peerTransport';
+import type { TableTransport, TransportStatus } from './transport';
 import { cleanText, parseInner, parseSigned, safeParse } from './validate';
 
 /** A roll as this browser holds it. `hidden` is set only on the host's own
@@ -104,10 +105,9 @@ function initialState(): TableState {
         count: 4,
         sides: 6,
         note: '',
-        /* GMs hide their rolls far more often than not, so that is the state the
-           checkbox starts in. Making it opt-in would mean the first roll of
-           every session leaks by accident. */
-        hideMyRolls: true,
+        /* Shown by default: at this table everyone sees every roll. The GM can
+           still tick "Hide my rolls" for one behind the screen. */
+        hideMyRolls: false,
         scripted: false,
         scriptSuccesses: 2,
         scriptTotal: 10,
@@ -186,7 +186,7 @@ const BUCKET_REFILL_MS = 2000;
 export class TableSession {
     readonly store = new TableStore();
 
-    private transport: RelayTransport | null = null;
+    private transport: TableTransport | null = null;
     private room: RoomSecrets | null = null;
     private identity: Identity | null = null;
 
@@ -305,10 +305,14 @@ export class TableSession {
             s.error = '';
         });
 
-        this.transport = new RelayTransport(roomUrl(this.room.addr), {
-            onMessage: (text) => { void this.receive(text); },
-            onStatus: (status, detail) => this.onStatus(status, detail),
-        });
+        const handlers = {
+            onMessage: (text: string) => { void this.receive(text); },
+            onStatus: (status: TransportStatus, detail: string) => this.onStatus(status, detail),
+        };
+        /* No relay deployed: browsers meet each other directly instead */
+        this.transport = peerToPeer()
+            ? new PeerTransport(this.room.addr, handlers)
+            : new RelayTransport(roomUrl(this.room.addr), handlers);
         this.transport.start();
 
         this.heartbeat = window.setInterval(() => this.tick(), HEARTBEAT_MS);

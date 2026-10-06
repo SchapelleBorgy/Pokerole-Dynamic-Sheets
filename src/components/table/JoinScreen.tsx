@@ -10,7 +10,7 @@ import { useTable } from '../../table/TableContext';
 import { HomeButton } from '../common/HomeButton';
 import { LIMITS } from '../../table/protocol';
 import { formatLobbyId, normaliseLobbyId } from '../../table/encoding';
-import { relayConfigured, relayReachable, usingLocalRelay } from '../../table/relay';
+import { relayReachable, usingLocalRelay } from '../../table/relay';
 
 export function JoinScreen() {
     const { session, state } = useTable();
@@ -33,31 +33,12 @@ export function JoinScreen() {
     }, []);
 
     useEffect(() => {
-        if (!relayConfigured()) return;
         let live = true;
         void relayReachable().then((ok) => { if (live) setReachable(ok); });
         return () => { live = false; };
     }, []);
 
     const busy = state.phase === 'joining';
-
-    if (!relayConfigured()) {
-        return (
-            <div className="join-screen">
-                <div className="join-card">
-                    <HomeButton className="icon-btn join-home" />
-                    <h1>Rolling Table</h1>
-                    <p className="setup-warning">
-                        <i className="fa-solid fa-triangle-exclamation"></i>{' '}
-                        No relay has been set up for this copy yet. The shared table needs a
-                        small service to pass messages between browsers — see{' '}
-                        <code>worker/README.md</code> in the project, then set{' '}
-                        <code>PRODUCTION_RELAY</code> in <code>src/table/relay.ts</code>.
-                    </p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="join-screen">

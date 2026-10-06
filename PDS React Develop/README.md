@@ -93,6 +93,14 @@ The Core Books version 1.25 and 3.0 already have pre-set bookmarks toward the mo
 
 Devices connect to each other directly (WebRTC through [Trystero](https://github.com/dmotz/trystero), which finds the other device through public Nostr relays), so there's no account and no server to run. The GM's JSON files are still the real save: keep using **Save All**, and a player can keep a copy with the backup button. If two devices reconnect after editing apart, the copy edited most recently wins. A few strict networks (some school, office or mobile networks) block direct connections; if the dot stays amber or turns red, try another network.
 
+**Rolling table (shared dice)**
+
+1. The GM opens `rolling-table.html`, picks **Start one**, and enters a name. The page shows a lobby id and a password under **Invite**, with copy buttons.
+2. Players open the same page, pick **Join a table**, and enter the lobby id, the password and their name.
+3. Everyone sees every roll. A player's **Ask to roll** goes to the GM's browser, which throws the dice and shows the result to the whole table, so nobody can fudge their own. The GM can tick **Hide my rolls** for a roll behind the screen.
+
+Like live sheets, browsers connect to each other directly, so no relay or account is needed. Everything sent is encrypted with a key made from the lobby id and password. The GM needs to keep the page open for players' rolls to go through.
+
 ## Under the hood
 
 React and TypeScript, built with Vite into three plain pages that run straight from disk — and install as a PWA, so it works offline once opened. The game data lives in `app-data/` as pre-built JS bundles (`pokedex-db.js`, `moves-db.js`, `abilities-db.js`, `items-db.js`, `natures-db.js`, `equip-icons-db.js`, `equip-icons-mono-db.js`, `sprite-frames-db.js`). Fonts are Outfit and Fira Code from Google Fonts; icons are FontAwesome 6.4.

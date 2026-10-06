@@ -20,7 +20,16 @@ const FIRST_DELAY_MS = 500;
 const MAX_DELAY_MS = 15_000;
 const GROWTH = 1.7;
 
-export class RelayTransport {
+/** What the session needs from whatever carries its messages. */
+export interface TableTransport {
+    start(): void;
+    stop(): void;
+    readonly connected: boolean;
+    /** Returns false when nothing could take the message, so the caller can queue. */
+    send(text: string): boolean;
+}
+
+export class RelayTransport implements TableTransport {
     private ws: WebSocket | null = null;
     private timer: number | null = null;
     private delay = FIRST_DELAY_MS;
