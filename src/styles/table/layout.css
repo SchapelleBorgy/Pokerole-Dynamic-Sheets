@@ -84,37 +84,168 @@
 .table-banner { background: #ef44441a; color: #fca5a5; }
 .table-notice { background: var(--primary-faint); color: var(--text-secondary); }
 
-.table-body {
+/* ---------------- The two halves ----------------
+   The dice on the left at a fixed width, and the GM's board (or, for a
+   player, the combat trackers) taking the rest — the same strip of panels
+   the GM screen has, scrolling sideways on its own. */
+.table-split {
     flex: 1;
     min-height: 0;
     display: flex;
-    gap: 1rem;
-    padding: 1rem;
 }
 
-.table-side {
-    flex: 0 0 19rem;
-    width: 19rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-    overflow-y: auto;
-}
-
-.table-main {
-    flex: 1;
-    min-width: 0;
+.table-dock {
+    flex: 0 0 23rem;
+    width: 23rem;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+    padding: 0.8rem;
+    border-right: 1px solid var(--border-color);
 }
 
-.feed-scroll {
+/* The invite, the members and the feed scroll together; the controls stay
+   put underneath them, so rolling never means scrolling to find the button. */
+.dock-scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
     padding-right: 0.25rem;
 }
+
+.dock-people {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--card-bg);
+}
+
+.dock-people > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.dock-people > summary::-webkit-details-marker { display: none; }
+
+.dock-people .fold { font-size: 0.6rem; transition: transform 0.15s; }
+.dock-people[open] .fold { transform: rotate(180deg); }
+
+.dock-people > summary .count {
+    margin-left: auto;
+    font-family: 'Fira Code', monospace;
+    color: var(--text-muted);
+}
+
+/* Inside the fold the two boxes lose their own frames: the fold is the box. */
+.dock-people .credentials,
+.dock-people .member-list {
+    border: 0;
+    background: transparent;
+    padding: 0 0.75rem 0.75rem;
+}
+
+.table-board {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.board-loading,
+.combat-waiting {
+    margin: auto;
+    padding: 2rem;
+    max-width: 30rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.combat-waiting > i { color: var(--ghost-color); }
+
+/* The narrow-screen switch between the halves. */
+.split-tabs { display: none; }
+
+.split-tabs button {
+    flex: 1;
+    justify-content: center;
+    border-radius: 8px;
+}
+
+.split-tabs button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-faint);
+}
+
+/* ---------------- A player's combat trackers ----------------
+   The GM's panels, minus the board's drag and resize: a row of them that
+   scrolls sideways, and a column of them on a narrow screen. */
+.combat-board {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: 0.8rem;
+    padding: 0.8rem;
+    overflow: auto;
+}
+
+.combat-board > .panel {
+    flex: 1 1 400px;
+    min-width: 340px;
+    max-width: 640px;
+}
+
+.combat-board .panel-body { padding-right: 0.7rem; }
+
+.combat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+/* Nothing on a player's row is a control. */
+.combat-row.read-only .pips,
+.combat-row.read-only .used-mark,
+.combat-row.read-only .status-chip { cursor: default; }
+
+.combat-row.read-only .pip:hover { border-color: var(--border-color); }
+.combat-row.read-only .pip.used:hover { border-color: var(--ghost-color); }
+.combat-row.read-only .used-mark:hover { color: var(--text-muted); border-color: var(--border-color); }
+.combat-row.read-only .used-mark.on:hover { color: #fca5a5; border-color: var(--danger); }
+
+.c-init-ro {
+    display: block;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.25rem 0.15rem;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--panel-solid);
+}
+
+/* The GM's "shown to the players" eye on each tracker. */
+.share-fight { color: var(--ok); border-color: var(--ok); }
+.share-fight.off { color: var(--text-muted); border-color: var(--border-color); }
+
+/* The live-sheet pill sits bottom left on every other page, which here is the
+   Roll button. */
+body > #live-pill { left: auto; right: 12px; }
 
 /* ---------------- Side panels ---------------- */
 
@@ -228,7 +359,19 @@ button.wide {
 }
 
 @media (max-width: 900px) {
-    .table-body { flex-direction: column; overflow-y: auto; }
-    .table-side { flex: 0 0 auto; width: auto; overflow: visible; }
-    .feed-scroll { overflow: visible; }
+    .split-tabs {
+        display: flex;
+        gap: 0.4rem;
+        flex: 0 0 auto;
+        padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--panel-strong);
+    }
+
+    .table-dock { flex: 1 1 auto; width: auto; border-right: 0; }
+    .table-split.show-dice .table-board,
+    .table-split.show-board .table-dock { display: none; }
+
+    .combat-board { flex-direction: column; overflow-x: hidden; }
+    .combat-board > .panel { flex: 0 0 auto; min-width: 0; max-width: none; }
 }

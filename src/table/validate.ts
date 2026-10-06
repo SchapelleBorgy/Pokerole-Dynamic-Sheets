@@ -11,7 +11,9 @@
    to try. */
 
 import { LIMITS } from './protocol';
-import type { Body, Inner, WireMember, WireRoll } from './protocol';
+import type { Body, Inner, WireCombatant, WireFight, WireMember, WireRoll } from './protocol';
+import { AILMENTS } from '../gm/ailments';
+import { MAX_ACTIONS, ROUND_FLAGGED } from '../gm/combat';
 
 /* Keys that must never survive a parse. `__proto__` in a JSON object literal is
    inert on its own, but the moment any code spreads or assigns that object into
@@ -127,6 +129,85 @@ function parseMember(raw: unknown): WireMember | null {
     return { id, name, host: raw.host };
 }
 
+/* ---------------------------------------------------------------- combat */
+
+const AILMENT_KEYS = new Set(AILMENTS.map((a) => a.key));
+const FLAGGED_KEYS = new Set(ROUND_FLAGGED);
+
+/** A sprite file name and nothing else: no slash, so it can only ever name a
+    file inside the sprite folders the page already looks in. */
+const IMG_RE = /^[A-Za-z0-9 _.()'-]{1,80}$/;
+
+function intOrNull(v: unknown, min: number, max: number): number | null | undefined {
+    if (v === null) return null;
+    const n = int(v, min, max);
+    return n === null ? undefined : n;
+}
+
+function parsePool(v: unknown): [number, number] | null | undefined {
+    if (v === null) return null;
+    if (!Array.isArray(v) || v.length !== 2) return undefined;
+    const cur = int(v[0], -9999, 99999);
+    const max = int(v[1], 0, 99999);
+    return cur === null || max === null ? undefined : [cur, max];
+}
+
+function parseCombatant(raw: unknown): WireCombatant | null {
+    if (!isRecord(raw)) return null;
+    if (!exactly(raw, ['id', 'name', 'kind', 'img', 'init', 'acted', 'clash', 'eva', 'hp', 'will', 'st', 'flags'])) return null;
+    const id = idText(raw.id);
+    const name = cleanText(raw.name, LIMITS.MAX_COMBAT_NAME) || '?';
+    if (!id || (raw.kind !== 't' && raw.kind !== 'p' && raw.kind !== 'c')) return null;
+    if (raw.img !== null && (typeof raw.img !== 'string' || !IMG_RE.test(raw.img))) return null;
+    const init = intOrNull(raw.init, -999, 9999);
+    const acted = int(raw.acted, 0, MAX_ACTIONS);
+    if (init === undefined || acted === null) return null;
+    if (typeof raw.clash !== 'boolean' || typeof raw.eva !== 'boolean') return null;
+    const hp = parsePool(raw.hp);
+    const will = parsePool(raw.will);
+    if (hp === undefined || will === undefined) return null;
+
+    let st: string[] | null = null;
+    if (raw.st !== null) {
+        if (!Array.isArray(raw.st) || raw.st.length > AILMENT_KEYS.size) return null;
+        st = [];
+        for (const k of raw.st) {
+            if (typeof k !== 'string' || !AILMENT_KEYS.has(k)) return null;
+            st.push(k);
+        }
+    }
+
+    if (!Array.isArray(raw.flags) || raw.flags.length > FLAGGED_KEYS.size) return null;
+    const flags: WireCombatant['flags'] = [];
+    for (const f of raw.flags) {
+        if (!isRecord(f) || !exactly(f, ['a', 'd', 'x'])) return null;
+        const d = int(f.d, 0, 9999);
+        if (typeof f.a !== 'string' || !FLAGGED_KEYS.has(f.a) || d === null || typeof f.x !== 'boolean') return null;
+        flags.push({ a: f.a, d, x: f.x });
+    }
+
+    return {
+        id, name, kind: raw.kind, img: raw.img as string | null, init, acted,
+        clash: raw.clash, eva: raw.eva, hp, will, st, flags,
+    };
+}
+
+function parseFight(raw: unknown): WireFight | null {
+    if (!isRecord(raw)) return null;
+    if (!exactly(raw, ['id', 'name', 'round', 'rows'])) return null;
+    const id = idText(raw.id);
+    const round = int(raw.round, 0, 99999);
+    if (!id || round === null) return null;
+    if (!Array.isArray(raw.rows) || raw.rows.length > LIMITS.MAX_COMBATANTS) return null;
+    const rows: WireCombatant[] = [];
+    for (const r of raw.rows) {
+        const parsed = parseCombatant(r);
+        if (!parsed) return null;
+        rows.push(parsed);
+    }
+    return { id, name: cleanText(raw.name, LIMITS.MAX_COMBAT_NAME) || 'Combat', round, rows };
+}
+
 export function parseBody(raw: unknown): Body | null {
     if (!isRecord(raw) || typeof raw.k !== 'string') return null;
 
@@ -184,6 +265,17 @@ export function parseBody(raw: unknown): Body | null {
             if (!exactly(raw, ['k', 'id'])) return null;
             const id = fingerprintText(raw.id);
             return id ? { k: 'kick', id } : null;
+        }
+        case 'combat': {
+            if (!exactly(raw, ['k', 'fights'])) return null;
+            if (!Array.isArray(raw.fights) || raw.fights.length > LIMITS.MAX_FIGHTS) return null;
+            const fights: WireFight[] = [];
+            for (const f of raw.fights) {
+                const parsed = parseFight(f);
+                if (!parsed) return null;
+                fights.push(parsed);
+            }
+            return { k: 'combat', fights };
         }
         default:
             return null;

@@ -13,6 +13,7 @@ import { AilmentPopover } from './AilmentPopover';
 import { STATUS_ICONS } from '../../gm/ailments';
 import { entityRef, writeStatus } from '../../gm/entities';
 import { WORKING_KEY } from '../../state/constants';
+import { GM_KEY } from '../../gm/constants';
 import { ActivePanelCtx, panelTabs } from '../../gm/phoneBoard';
 import { combatGidOf, isCombatPanelKey } from '../../gm/constants';
 import { useDeviceClass } from '../../lib/device';
@@ -22,7 +23,13 @@ import type { GmStatus } from '../../gm/ailments';
 /* The board: six panels side by side, in whatever order and at whatever widths
    the GM has left them. */
 
-export function GmApp({ dataOk }: { dataOk: boolean }) {
+export function GmApp({ dataOk, embedded, combatActions }: {
+    dataOk: boolean;
+    /** Inside another page (the rolling table), which has its own way home. */
+    embedded?: boolean;
+    /** Extra buttons for a combat tracker's head, by fight. */
+    combatActions?: (gid: string) => React.ReactNode;
+}) {
     const { state, store } = useGm();
     const { data } = useAppData();
     const [tipToken, setTipToken] = useState<string | null>(null);
@@ -55,6 +62,10 @@ export function GmApp({ dataOk }: { dataOk: boolean }) {
         const refresh = () => store.refresh();
         const onStorage = (e: StorageEvent) => {
             if (e.key === WORKING_KEY || (e.key || '').indexOf('pokerole_wild_') === 0) refresh();
+            /* The same board open in a second page (the GM screen beside the
+               rolling table): take its save rather than overwrite it with
+               this page's older copy on the next edit here. */
+            else if (e.key === GM_KEY && e.newValue) store.reload();
         };
         const poll = window.setInterval(() => {
             const now = localStorage.getItem(WORKING_KEY);
@@ -141,6 +152,7 @@ export function GmApp({ dataOk }: { dataOk: boolean }) {
                 onReorder={reorder}
                 onOpenTip={setTipToken}
                 cycleStatus={cycleStatus}
+                extraActions={combatActions?.(c.gid)}
             />
         );
     };
@@ -157,7 +169,7 @@ export function GmApp({ dataOk }: { dataOk: boolean }) {
 
     return (
         <>
-            <TopBar />
+            <TopBar embedded={embedded} />
             <div id="data-missing" style={{ display: dataOk ? 'none' : 'block' }}>
                 <i className="fa-solid fa-triangle-exclamation"></i>
                 {' '}The <strong>app-data</strong> folder was not found next to this file — sprites and

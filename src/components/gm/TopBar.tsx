@@ -13,7 +13,7 @@ import {
 
 /* The bar across the top: the session file controls and the version label. */
 
-export function TopBar() {
+export function TopBar({ embedded }: { embedded?: boolean }) {
     const { state, store } = useGm();
     const { data } = useAppData();
     const confirm = useGmConfirm();
@@ -103,7 +103,7 @@ export function TopBar() {
     return (
         <>
             <div className="topbar">
-                <HomeButton className="icon-btn" />
+                {!embedded && <HomeButton className="icon-btn" />}
                 <span className="logo"><i className="fa-solid fa-chess-board"></i> Pokerole GM Screen</span>
 
                 {/* One toggle per board section, lit while the section is on.

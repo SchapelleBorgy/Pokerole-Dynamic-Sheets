@@ -27,7 +27,7 @@ import type { Bytes } from './encoding';
 import { createHostIdentity, loadHostIdentity, memberIdentity } from './identity';
 import type { Identity } from './identity';
 import { HEARTBEAT_MS, LIMITS, PRESENCE_TIMEOUT_MS, PROTOCOL_VERSION, randomId } from './protocol';
-import type { Body, Inner, WireMember, WireRoll } from './protocol';
+import type { Body, Inner, WireFight, WireMember, WireRoll } from './protocol';
 import { peerToPeer, roomUrl } from './relay';
 import { fabricateD6, fabricateTotal } from './scripted';
 import { RelayTransport } from './transport';
@@ -71,6 +71,9 @@ export interface TableState {
     pending: PendingRoll[];
     /** False when the GM has gone quiet: the table waits rather than rolls. */
     hostOnline: boolean;
+    /** The GM's combat trackers, as last received. Null until the first one
+        arrives; always null on the host, whose board is the real thing. */
+    combat: WireFight[] | null;
 
     /* Roll controls. */
     count: number;
@@ -102,6 +105,7 @@ function initialState(): TableState {
         rolls: [],
         pending: [],
         hostOnline: false,
+        combat: null,
         count: 4,
         sides: 6,
         note: '',
@@ -215,6 +219,19 @@ export class TableSession {
     private heartbeat: number | null = null;
     private hostSeenAt = 0;
 
+    /* Sends go out one at a time, in sequence order, and arrivals are handled
+       one at a time in the order they came. Signing and decrypting are both
+       async, so without this a small message could overtake a large one, and
+       the replay check would then drop the large one as old. */
+    private outbox: Promise<unknown> = Promise.resolve();
+    private inbox: Promise<unknown> = Promise.resolve();
+
+    /* Host only: the combat trackers the players are shown, already in wire
+       shape, and the timer that batches a burst of edits into one send. */
+    private combat: WireFight[] | null = null;
+    private combatJson = '';
+    private combatTimer: number | null = null;
+
     /* ------------------------------------------------------------- joining */
 
     /** Creates a lobby. The id is the fingerprint of the keypair generated here,
@@ -287,6 +304,8 @@ export class TableSession {
         this.greeted.clear();
         this.handledRids.clear();
         this.buckets.clear();
+        this.combat = null;
+        this.combatJson = '';
         if (isHost) this.names.set(identity.id, name);
 
         saveSession({ lobbyId, password, name });
@@ -302,11 +321,14 @@ export class TableSession {
             s.rolls = [];
             s.pending = [];
             s.hostOnline = isHost;
+            s.combat = null;
             s.error = '';
         });
 
         const handlers = {
-            onMessage: (text: string) => { void this.receive(text); },
+            onMessage: (text: string) => {
+                this.inbox = this.inbox.then(() => this.receive(text)).catch(() => { /* dropped */ });
+            },
             onStatus: (status: TransportStatus, detail: string) => this.onStatus(status, detail),
         };
         /* No relay deployed: browsers meet each other directly instead */
@@ -322,6 +344,10 @@ export class TableSession {
         if (this.heartbeat !== null) {
             clearInterval(this.heartbeat);
             this.heartbeat = null;
+        }
+        if (this.combatTimer !== null) {
+            clearTimeout(this.combatTimer);
+            this.combatTimer = null;
         }
         this.transport?.stop();
         this.transport = null;
@@ -345,7 +371,13 @@ export class TableSession {
 
     /* ------------------------------------------------------------ outbound */
 
-    private async publish(body: Body): Promise<boolean> {
+    private publish(body: Body): Promise<boolean> {
+        const run = this.outbox.then(() => this.publishNow(body));
+        this.outbox = run.catch(() => false);
+        return run;
+    }
+
+    private async publishNow(body: Body): Promise<boolean> {
         if (!this.room || !this.identity) return false;
 
         const inner: Inner = {
@@ -537,6 +569,16 @@ export class TableSession {
                 this.store.update((s) => { s.rolls = []; });
                 break;
 
+            case 'combat': {
+                /* Resent on every heartbeat, so most arrivals change nothing;
+                   only redraw when one does. */
+                const json = JSON.stringify(body.fights);
+                if (json === this.combatJson) break;
+                this.combatJson = json;
+                this.store.update((s) => { s.combat = body.fights; s.hostOnline = true; });
+                break;
+            }
+
             case 'kick':
                 if (body.id === this.store.state.myId) {
                     this.leave();
@@ -571,6 +613,12 @@ export class TableSession {
                 .map(stripLocal);
             if (rolls.length) void this.publish({ k: 'sync', rolls });
         }
+
+        /* The combat board goes with every answer, not only the first: a
+           player whose link dropped while the GM was editing has missed those
+           updates and keeps the same page id, so "already greeted" says
+           nothing about whether their board is current. */
+        if (this.combat) void this.publish({ k: 'combat', fights: this.combat });
     }
 
     private onRequest(
@@ -715,6 +763,24 @@ export class TableSession {
 
     /* --------------------------------------------------------- host actions */
 
+    /** The GM's board changed: show the players the new combat trackers.
+        Called on every store change, so it batches a burst of edits (a name
+        being typed, a pool stepped five times) into one send, and sends
+        nothing at all when the players' view did not actually change. */
+    shareCombat(fights: WireFight[]): void {
+        if (!this.store.state.isHost) return;
+        const fitted = fitCombat(fights);
+        const json = JSON.stringify(fitted);
+        if (json === this.combatJson) return;
+        this.combatJson = json;
+        this.combat = fitted;
+        if (this.combatTimer !== null) clearTimeout(this.combatTimer);
+        this.combatTimer = window.setTimeout(() => {
+            this.combatTimer = null;
+            if (this.combat) void this.publish({ k: 'combat', fights: this.combat });
+        }, 200);
+    }
+
     clearFeed(): void {
         if (!this.store.state.isHost) return;
         this.store.update((s) => { s.rolls = []; });
@@ -760,6 +826,24 @@ export class TableSession {
 
 function clamp(v: number, min: number, max: number): number {
     return Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : min;
+}
+
+/** Keeps a combat message under the size every receiver accepts, trimming
+    rows from the end and then whole fights. A real table never gets near it;
+    this is for the GM who leaves forty wild Pokémon on one tracker. */
+function fitCombat(fights: WireFight[]): WireFight[] {
+    const out = fights.slice(0, LIMITS.MAX_FIGHTS).map((f) => ({
+        ...f, rows: f.rows.slice(0, LIMITS.MAX_COMBATANTS),
+    }));
+    /* Room left for the signed wrapper around the body: the key, the ids and
+       the counters come to well under a kilobyte. */
+    const budget = LIMITS.MAX_WIRE_CHARS - 2048;
+    while (out.length && JSON.stringify(out).length > budget) {
+        const last = out[out.length - 1];
+        if (last.rows.length) last.rows = last.rows.slice(0, -1);
+        else out.pop();
+    }
+    return out;
 }
 
 /** Drops the host-only fields before a roll goes on the wire. */

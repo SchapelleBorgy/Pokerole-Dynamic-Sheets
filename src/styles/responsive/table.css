@@ -2,10 +2,10 @@
    The mobile / tablet wrapper, part 4: the Rolling Table.
 
    Much the shortest of the four. This page was built after the
-   breakpoint work on the others and already stacks its feed and its
-   side rail at 900px, which covers both reference sizes — a 10.5"
-   tablet on its side is 1112 and keeps the two-column layout, a phone
-   is 412 and gets the stack. What is left is the phone chrome: safe
+   breakpoint work on the others and already shows one half at a time
+   (dice, or the board) below 900px, which covers both reference sizes —
+   a 10.5" tablet on its side is 1112 and keeps the two halves side by
+   side, a phone is 412 and gets the tabs. What is left is the phone chrome: safe
    areas, the dynamic viewport, and a bar that fits.
    ============================================================ */
 
@@ -25,8 +25,9 @@ html[data-device="phone"] .table-bar h1 {
     font-size: 0.9rem;
 }
 
-html[data-device="phone"] .table-body {
-    padding-bottom: var(--safe-bottom);
+html[data-device="phone"] .table-dock,
+html[data-device="phone"] .combat-board {
+    padding-bottom: calc(0.8rem + var(--safe-bottom));
 }
 
 /* The lobby id and its 32-character password are the two strings on
@@ -43,6 +44,7 @@ html[data-device="tablet"] .table-bar {
     padding-right: calc(1rem + var(--safe-right));
 }
 
-html[data-device="tablet"] .table-body {
-    padding-bottom: var(--safe-bottom);
+html[data-device="tablet"] .table-dock,
+html[data-device="tablet"] .combat-board {
+    padding-bottom: calc(0.8rem + var(--safe-bottom));
 }

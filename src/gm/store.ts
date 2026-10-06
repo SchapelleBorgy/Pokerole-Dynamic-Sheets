@@ -67,6 +67,14 @@ export class GmStore {
         }
     }
 
+    /** Take the board as another page last saved it, without writing it back:
+        the GM screen and the rolling table can both be open on one board, and
+        whichever saved last is the one to show. */
+    reload(): void {
+        this.state = loadGmState();
+        this.notify();
+    }
+
     /** Replace everything — loading a session file. */
     replace(state: GmState): void {
         this.state = state;

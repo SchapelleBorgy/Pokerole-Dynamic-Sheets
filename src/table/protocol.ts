@@ -43,6 +43,38 @@ export interface WireMember {
     host: boolean;
 }
 
+/** One row of a combat tracker as the players see it. Everything here is
+    already worked out on the GM's machine (paralysis applied to initiative,
+    pools read off the sheets, ailment damage for this Round), so a player
+    needs no sheets and no Pokédex to draw it. */
+export interface WireCombatant {
+    id: string;
+    name: string;
+    /** trainer, Pokémon, or typed in by hand. */
+    kind: 't' | 'p' | 'c';
+    /** Sprite file name from the Pokédex, e.g. `pikachu.png`. */
+    img: string | null;
+    /** As the GM's row shows it: paralysis already taken off. */
+    init: number | null;
+    acted: number;
+    clash: boolean;
+    eva: boolean;
+    /** [current, max], or null when there is no sheet behind the row. */
+    hp: [number, number] | null;
+    will: [number, number] | null;
+    /** Active ailment keys, or null for a row with no status to show. */
+    st: string[] | null;
+    /** The round-start reminders: ailment key, HP it costs, already dealt. */
+    flags: { a: string; d: number; x: boolean }[];
+}
+
+export interface WireFight {
+    id: string;
+    name: string;
+    round: number;
+    rows: WireCombatant[];
+}
+
 export type Body =
     /** Any member, on connect and every heartbeat. Doubles as presence. */
     | { k: 'hello'; name: string }
@@ -57,7 +89,9 @@ export type Body =
     /** Host only. */
     | { k: 'clear' }
     /** Host only. */
-    | { k: 'kick'; id: string };
+    | { k: 'kick'; id: string }
+    /** Host only. The GM's combat trackers, whole, every time they change. */
+    | { k: 'combat'; fights: WireFight[] };
 
 export interface Inner {
     v: number;
@@ -91,6 +125,12 @@ export const LIMITS = {
     MAX_NOTE: 60,
     MAX_MEMBERS: 16,
     MAX_SYNC: 30,
+
+    /** Combat trackers shared with the players. Far above any real table:
+        the GM screen itself gets unwieldy well before this. */
+    MAX_FIGHTS: 8,
+    MAX_COMBATANTS: 40,
+    MAX_COMBAT_NAME: 40,
 
     /** Kept below the relay's own 32 KB ceiling. */
     MAX_WIRE_CHARS: 24 * 1024,

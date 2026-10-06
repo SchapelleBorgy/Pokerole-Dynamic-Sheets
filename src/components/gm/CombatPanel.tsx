@@ -30,8 +30,10 @@ import type { PokedexEntry } from '../../data/types';
    and refill on every cut between the two. `combat` is the fight this panel
    shows; every write goes through `mutate`, which finds it again by gid. */
 
-export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus }: {
+export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraActions }: {
     combat: GmCombat;
+    /** Buttons the host page adds to this fight's head. */
+    extraActions?: React.ReactNode;
     onReorder: (from: string, to: string) => void;
     onOpenTip: (token: string) => void;
     cycleStatus: (token: string, key: string, e: React.MouseEvent) => void;
@@ -214,6 +216,7 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus }: {
                     <span className="round-pill">
                         <i className="fa-solid fa-rotate"></i> Round <span id="round-num">{round}</span>
                     </span>
+                    {extraActions}
                     <button
                         className="icon-btn"
                         title="Sort by initiative, highest first"
