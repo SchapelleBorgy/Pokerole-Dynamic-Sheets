@@ -8,7 +8,9 @@
 export type TransportStatus = 'offline' | 'connecting' | 'online';
 
 export interface TransportHandlers {
-    onMessage: (text: string) => void;
+    /** `from` names the connection it came in on, where the transport has
+        one per browser (the direct one does; a relay is a single socket). */
+    onMessage: (text: string, from?: string) => void;
     onStatus: (status: TransportStatus, detail: string) => void;
 }
 
@@ -25,8 +27,9 @@ export interface TableTransport {
     start(): void;
     stop(): void;
     readonly connected: boolean;
-    /** Returns false when nothing could take the message, so the caller can queue. */
-    send(text: string): boolean;
+    /** Returns false when nothing could take the message, so the caller can queue.
+        `to` is a connection from onMessage: deliver to that browser alone. */
+    send(text: string, to?: string): boolean;
 }
 
 export class RelayTransport implements TableTransport {
@@ -63,8 +66,10 @@ export class RelayTransport implements TableTransport {
         return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
     }
 
-    /** Returns false when the socket is not open, so the caller can queue. */
-    send(text: string): boolean {
+    /** Returns false when the socket is not open, so the caller can queue.
+        A relay socket reaches everyone, so `to` is not used: a message meant
+        for one member says so inside, and the others drop it. */
+    send(text: string, _to?: string): boolean {
         if (!this.connected) return false;
         try {
             this.ws!.send(text);

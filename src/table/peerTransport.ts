@@ -28,7 +28,7 @@ function joinRoom(): JoinRoom<NostrRoomConfig> {
 
 export class PeerTransport implements TableTransport {
     private room: Room | null = null;
-    private sendText: ((text: string) => Promise<void>) | null = null;
+    private sendText: ((text: string, to?: string) => Promise<void>) | null = null;
     private peers = new Set<string>();
 
     constructor(private addr: string, private handlers: TransportHandlers) {}
@@ -46,13 +46,13 @@ export class PeerTransport implements TableTransport {
             },
         });
         const msg = room.makeAction('m');
-        msg.onMessage = (data) => { if (typeof data === 'string') this.handlers.onMessage(data); };
+        msg.onMessage = (data, ctx) => { if (typeof data === 'string') this.handlers.onMessage(data, ctx.peerId); };
         room.onPeerJoin = (id) => {
             this.peers.add(id);
             this.handlers.onStatus('online', '');
         };
         room.onPeerLeave = (id) => { this.peers.delete(id); };
-        this.sendText = (text) => msg.send(text);
+        this.sendText = (text, to) => msg.send(text, to === undefined ? undefined : { target: to });
         this.room = room;
         /* In the room as soon as it is joined, as a relay socket is once open:
            a GM sitting alone can already roll into the feed. */
@@ -72,9 +72,13 @@ export class PeerTransport implements TableTransport {
         return this.room !== null && this.peers.size > 0;
     }
 
-    send(text: string): boolean {
+    /** With `to`, only that browser is sent the message at all: the others
+        never receive the bytes, which is what keeps one player's fights off
+        another player's machine. */
+    send(text: string, to?: string): boolean {
         if (!this.sendText || !this.peers.size) return false;
-        this.sendText(text).catch((e) => console.warn('Rolling table: send', e));
+        if (to !== undefined && !this.peers.has(to)) return false;
+        this.sendText(text, to).catch((e) => console.warn('Rolling table: send', e));
         return true;
     }
 }

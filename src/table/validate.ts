@@ -267,7 +267,9 @@ export function parseBody(raw: unknown): Body | null {
             return id ? { k: 'kick', id } : null;
         }
         case 'combat': {
-            if (!exactly(raw, ['k', 'fights'])) return null;
+            if (!exactly(raw, ['k', 'to', 'fights'])) return null;
+            const to = fingerprintText(raw.to);
+            if (!to) return null;
             if (!Array.isArray(raw.fights) || raw.fights.length > LIMITS.MAX_FIGHTS) return null;
             const fights: WireFight[] = [];
             for (const f of raw.fights) {
@@ -275,7 +277,7 @@ export function parseBody(raw: unknown): Body | null {
                 if (!parsed) return null;
                 fights.push(parsed);
             }
-            return { k: 'combat', fights };
+            return { k: 'combat', to, fights };
         }
         default:
             return null;

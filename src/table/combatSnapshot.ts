@@ -69,10 +69,10 @@ function row(
     };
 }
 
-/** Every fight on the board, in the order the GM has the panels, minus the
-    ones the GM is keeping from the players. */
+/** Every fight on the board, in the order the GM has the panels. Who sees
+    which is settled per player in session.ts, from fightAccess() below. */
 export function combatSnapshot(
-    state: GmState, dexById: (id: string) => PokedexEntry | null, hidden: ReadonlySet<string>,
+    state: GmState, dexById: (id: string) => PokedexEntry | null,
 ): WireFight[] {
     const order = state.layout.order.filter(isCombatPanelKey).map(combatGidOf);
     const at = (gid: string) => {
@@ -80,7 +80,6 @@ export function combatSnapshot(
         return i < 0 ? order.length : i;
     };
     return state.combats
-        .filter((c) => !hidden.has(c.gid))
         .slice()
         .sort((a, b) => at(a.gid) - at(b.gid))
         .map((c, i) => {
@@ -94,31 +93,68 @@ export function combatSnapshot(
         });
 }
 
-/* Which fights the GM is keeping to themselves, by gid. Kept apart from the
-   GM screen's own saved board so the GM screen never has to know about it:
-   it is a rolling-table setting, and a fight with no entry here is shown. */
-const HIDDEN_KEY = 'pokerole_table_hidden_fights';
+/* Who may see which fight, by gid. Kept apart from the GM screen's own saved
+   board so the GM screen never has to know about it: it is a rolling-table
+   setting. A fight with no entry is everyone's, including players who join
+   later; an entry lists exactly the players who may see it, and an empty one
+   hides the fight from all of them.
 
-let hiddenCache: ReadonlySet<string> | null = null;
-const hiddenListeners = new Set<() => void>();
+   Players are kept by id, which is fixed for one browser at one lobby, with
+   the name they had, so a player who has stepped away can still be shown
+   (and unticked) by name. */
+export interface FightViewer { id: string; name: string }
+export type FightAccess = Readonly<Record<string, readonly FightViewer[]>>;
 
-export function hiddenFights(): ReadonlySet<string> {
-    if (hiddenCache) return hiddenCache;
-    let list: unknown = [];
-    try { list = JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]'); } catch { /* unreadable: none */ }
-    hiddenCache = new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
-    return hiddenCache;
+const ACCESS_KEY = 'pokerole_table_fight_access';
+/* The first version only had shown-or-hidden. */
+const OLD_HIDDEN_KEY = 'pokerole_table_hidden_fights';
+
+let accessCache: FightAccess | null = null;
+const accessListeners = new Set<() => void>();
+
+function readAccess(): FightAccess {
+    const out: Record<string, FightViewer[]> = {};
+    try {
+        const raw: unknown = JSON.parse(localStorage.getItem(ACCESS_KEY) || '{}');
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            for (const [gid, list] of Object.entries(raw as Record<string, unknown>)) {
+                if (!Array.isArray(list)) continue;
+                out[gid] = list.filter((v): v is FightViewer => !!v && typeof v === 'object'
+                    && typeof (v as FightViewer).id === 'string' && typeof (v as FightViewer).name === 'string');
+            }
+        }
+        const old: unknown = JSON.parse(localStorage.getItem(OLD_HIDDEN_KEY) || '[]');
+        if (Array.isArray(old) && old.length) {
+            for (const gid of old) if (typeof gid === 'string' && !out[gid]) out[gid] = [];
+            localStorage.setItem(ACCESS_KEY, JSON.stringify(out));
+        }
+        localStorage.removeItem(OLD_HIDDEN_KEY);
+    } catch { /* unreadable or private mode: everyone sees everything */ }
+    return out;
 }
 
-export function setFightHidden(gid: string, hide: boolean): void {
-    const next = new Set(hiddenFights());
-    if (hide) next.add(gid); else next.delete(gid);
-    hiddenCache = next;
-    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])); } catch { /* private mode */ }
-    hiddenListeners.forEach((l) => l());
+export function fightAccess(): FightAccess {
+    if (!accessCache) accessCache = readAccess();
+    return accessCache;
 }
 
-export function subscribeHiddenFights(cb: () => void): () => void {
-    hiddenListeners.add(cb);
-    return () => { hiddenListeners.delete(cb); };
+/** null gives the fight back to everyone. */
+export function setFightAccess(gid: string, viewers: readonly FightViewer[] | null): void {
+    const next: Record<string, readonly FightViewer[]> = { ...fightAccess() };
+    if (viewers) next[gid] = viewers; else delete next[gid];
+    accessCache = next;
+    try { localStorage.setItem(ACCESS_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+    accessListeners.forEach((l) => l());
+}
+
+export function subscribeFightAccess(cb: () => void): () => void {
+    accessListeners.add(cb);
+    return () => { accessListeners.delete(cb); };
+}
+
+/** The same, as the session wants it: member ids only. */
+export function accessIds(access: FightAccess): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const [gid, list] of Object.entries(access)) out[gid] = list.map((v) => v.id);
+    return out;
 }

@@ -90,8 +90,10 @@ export type Body =
     | { k: 'clear' }
     /** Host only. */
     | { k: 'kick'; id: string }
-    /** Host only. The GM's combat trackers, whole, every time they change. */
-    | { k: 'combat'; fights: WireFight[] };
+    /** Host only, to one player: the combat trackers that player may see,
+        whole, every time they change. Each player gets their own, because
+        the GM picks who sees which fight. */
+    | { k: 'combat'; to: string; fights: WireFight[] };
 
 export interface Inner {
     v: number;

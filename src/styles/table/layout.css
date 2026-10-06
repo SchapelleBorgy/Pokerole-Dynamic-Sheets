@@ -239,9 +239,84 @@
     background: var(--panel-solid);
 }
 
-/* The GM's "shown to the players" eye on each tracker. */
-.share-fight { color: var(--ok); border-color: var(--ok); }
+/* The GM's "who can see this fight" button on each tracker: green for
+   everyone, amber for some players, dim for nobody. */
+.share-fight { color: var(--ok); border-color: var(--ok); gap: 0.3rem; }
+.share-fight.some { color: var(--crit); border-color: var(--crit); }
 .share-fight.off { color: var(--text-muted); border-color: var(--border-color); }
+.share-count { font-family: 'Fira Code', monospace; font-size: 0.68rem; font-weight: 700; }
+
+.share-pop {
+    position: fixed;
+    z-index: 400;
+    width: 260px;
+    max-height: min(70vh, 420px);
+    overflow-y: auto;
+    padding: 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    background: var(--panel-solid);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px #000a;
+    font-size: 0.82rem;
+}
+
+.share-pop-title {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.15rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.share-pop-title strong { color: var(--text-primary); }
+
+.share-quick { display: flex; gap: 0.35rem; margin-bottom: 0.25rem; }
+
+.share-quick button {
+    flex: 1;
+    justify-content: center;
+    font-size: 0.75rem;
+}
+
+.share-quick button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-faint);
+}
+
+.share-player {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.35rem;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.share-player:hover { background: var(--primary-faint); }
+
+.share-player span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.share-player em {
+    font-style: normal;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+.share-empty,
+.share-hint { margin: 0.2rem 0 0; font-size: 0.7rem; }
 
 /* The live-sheet pill sits bottom left on every other page, which here is the
    Roll button. */

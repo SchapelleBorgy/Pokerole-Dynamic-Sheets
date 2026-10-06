@@ -226,11 +226,20 @@ export class TableSession {
     private outbox: Promise<unknown> = Promise.resolve();
     private inbox: Promise<unknown> = Promise.resolve();
 
-    /* Host only: the combat trackers the players are shown, already in wire
-       shape, and the timer that batches a burst of edits into one send. */
+    /* Host only: every combat tracker, already in wire shape; who may see
+       which (by fight id: a list of member ids, or no entry for everyone);
+       what each player was last sent; and the timer that batches a burst of
+       edits into one round of sends. On a player, combatJson is the last
+       board received, so an unchanged resend does not redraw. */
     private combat: WireFight[] | null = null;
+    private combatAccess: Readonly<Record<string, readonly string[]>> = {};
     private combatJson = '';
+    private combatSent = new Map<string, string>();
     private combatTimer: number | null = null;
+
+    /* Host only: member id -> the connection their messages last came in on,
+       so a message meant for one player goes to that player's browser alone. */
+    private peerOf = new Map<string, string>();
 
     /* ------------------------------------------------------------- joining */
 
@@ -305,7 +314,10 @@ export class TableSession {
         this.handledRids.clear();
         this.buckets.clear();
         this.combat = null;
+        this.combatAccess = {};
         this.combatJson = '';
+        this.combatSent.clear();
+        this.peerOf.clear();
         if (isHost) this.names.set(identity.id, name);
 
         saveSession({ lobbyId, password, name });
@@ -326,8 +338,8 @@ export class TableSession {
         });
 
         const handlers = {
-            onMessage: (text: string) => {
-                this.inbox = this.inbox.then(() => this.receive(text)).catch(() => { /* dropped */ });
+            onMessage: (text: string, from?: string) => {
+                this.inbox = this.inbox.then(() => this.receive(text, from)).catch(() => { /* dropped */ });
             },
             onStatus: (status: TransportStatus, detail: string) => this.onStatus(status, detail),
         };
@@ -371,13 +383,15 @@ export class TableSession {
 
     /* ------------------------------------------------------------ outbound */
 
-    private publish(body: Body): Promise<boolean> {
-        const run = this.outbox.then(() => this.publishNow(body));
+    /** Signs, seals and sends. `to` is a connection to send down alone;
+        without it, everyone at the table gets the message. */
+    private publish(body: Body, to?: string): Promise<boolean> {
+        const run = this.outbox.then(() => this.publishNow(body, to));
         this.outbox = run.catch(() => false);
         return run;
     }
 
-    private async publishNow(body: Body): Promise<boolean> {
+    private async publishNow(body: Body, to?: string): Promise<boolean> {
         if (!this.room || !this.identity) return false;
 
         const inner: Inner = {
@@ -402,7 +416,7 @@ export class TableSession {
         const g = await sign(this.identity.pair, utf8(p));
         const wire = await seal(this.room.key, this.room.addr, JSON.stringify({ p, g }));
 
-        return this.transport?.send(wire) ?? false;
+        return this.transport?.send(wire, to) ?? false;
     }
 
     private onStatus(status: TransportStatus, detail: string): void {
@@ -474,7 +488,7 @@ export class TableSession {
         Only then does anything reach the state. Every failure is a silent drop:
         a hostile sender learns nothing from the difference between "malformed"
         and "bad signature". */
-    private async receive(wire: string): Promise<void> {
+    private async receive(wire: string, from?: string): Promise<void> {
         if (!this.room || !this.identity) return;
         if (wire.length > LIMITS.MAX_WIRE_CHARS * 2) return;
 
@@ -511,6 +525,10 @@ export class TableSession {
             const oldest = this.seen.keys().next().value;
             if (oldest !== undefined) this.seen.delete(oldest);
         }
+
+        /* Only now, with the signature checked: the member this connection
+           speaks for is the one whose key signed what came down it. */
+        if (from && this.store.state.isHost) this.peerOf.set(inner.f, from);
 
         this.dispatch(inner);
     }
@@ -570,6 +588,9 @@ export class TableSession {
                 break;
 
             case 'combat': {
+                /* Over a relay every player's board reaches everyone; only
+                   ours is ours to show. */
+                if (body.to !== this.store.state.myId) break;
                 /* Resent on every heartbeat, so most arrivals change nothing;
                    only redraw when one does. */
                 const json = JSON.stringify(body.fights);
@@ -618,7 +639,7 @@ export class TableSession {
            player whose link dropped while the GM was editing has missed those
            updates and keeps the same page id, so "already greeted" says
            nothing about whether their board is current. */
-        if (this.combat) void this.publish({ k: 'combat', fights: this.combat });
+        this.sendCombatTo(id, true);
     }
 
     private onRequest(
@@ -671,6 +692,8 @@ export class TableSession {
                 this.lastSeenAt.delete(id);
                 this.names.delete(id);
                 this.greeted.delete(id);
+                this.combatSent.delete(id);
+                this.peerOf.delete(id);
                 changed = true;
             }
         }
@@ -763,22 +786,43 @@ export class TableSession {
 
     /* --------------------------------------------------------- host actions */
 
-    /** The GM's board changed: show the players the new combat trackers.
-        Called on every store change, so it batches a burst of edits (a name
-        being typed, a pool stepped five times) into one send, and sends
-        nothing at all when the players' view did not actually change. */
-    shareCombat(fights: WireFight[]): void {
+    /** The GM's board changed, or who may see which fight did: bring every
+        player's view up to date. Called on every store change, so it batches
+        a burst of edits (a name being typed, a pool stepped five times) into
+        one round of sends, and each player is only sent anything when their
+        own view actually changed.
+
+        `access` maps a fight's id to the members who may see it; a fight
+        with no entry is everyone's, and an empty list is nobody's. */
+    shareCombat(fights: WireFight[], access: Readonly<Record<string, readonly string[]>>): void {
         if (!this.store.state.isHost) return;
-        const fitted = fitCombat(fights);
-        const json = JSON.stringify(fitted);
+        const json = JSON.stringify([fights, access]);
         if (json === this.combatJson) return;
         this.combatJson = json;
-        this.combat = fitted;
+        this.combat = fights;
+        this.combatAccess = access;
         if (this.combatTimer !== null) clearTimeout(this.combatTimer);
         this.combatTimer = window.setTimeout(() => {
             this.combatTimer = null;
-            if (this.combat) void this.publish({ k: 'combat', fights: this.combat });
+            for (const id of this.names.keys()) {
+                if (id !== this.store.state.myId) this.sendCombatTo(id, false);
+            }
         }, 200);
+    }
+
+    /** One player's view: the fights they may see, and nothing of the rest.
+        Built here on the GM's machine and sent to that player's browser
+        alone, so a fight kept from someone never reaches their device. */
+    private sendCombatTo(id: string, force: boolean): void {
+        if (!this.combat) return;
+        const mine = fitCombat(this.combat.filter((f) => {
+            const who = this.combatAccess[f.id];
+            return !who || who.includes(id);
+        }));
+        const json = JSON.stringify(mine);
+        if (!force && this.combatSent.get(id) === json) return;
+        this.combatSent.set(id, json);
+        void this.publish({ k: 'combat', to: id, fights: mine }, this.peerOf.get(id));
     }
 
     clearFeed(): void {
@@ -793,6 +837,8 @@ export class TableSession {
         this.lastSeenAt.delete(id);
         this.greeted.delete(id);
         this.buckets.delete(id);
+        this.combatSent.delete(id);
+        this.peerOf.delete(id);
         void this.publish({ k: 'kick', id });
         void this.publishRoster();
     }
