@@ -98,6 +98,9 @@ Devices connect to each other directly (WebRTC through [Trystero](https://github
 1. The GM opens `rolling-table.html`, picks **Start one**, and enters a name. The page shows a lobby id and a password under **Invite**, with copy buttons.
 2. Players open the same page, pick **Join a table**, and enter the lobby id, the password and their name.
 3. Everyone sees every roll. A player's **Ask to roll** goes to the GM's browser, which throws the dice and shows the result to the whole table, so nobody can fudge their own. The GM can tick **Hide my rolls** for a roll behind the screen.
+4. The GM's page is the whole GM screen (roster, combat, dice, NPCs, generator, notes) with the shared dice beside it. It is the same board as `gm-screen.html`, so anything set up there is already here.
+5. Players see the dice and the GM's combat trackers, and nothing else of the board. The trackers update as the GM changes them: initiative, HP and Will, statuses, actions used, Clash and Evasion, and the round. Players can look but not change anything. The eye button on a tracker hides that fight from the players, for one the GM is still setting up.
+6. On a phone, **Dice** and **Combat** (or **GM screen**) tabs switch between the two halves.
 
 Like live sheets, browsers connect to each other directly, so no relay or account is needed. Everything sent is encrypted with a key made from the lobby id and password. The GM needs to keep the page open for players' rolls to go through.
 
