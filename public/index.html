@@ -123,9 +123,8 @@
             line-height: 1.45;
         }
 
-        /* Greyed out and inert rather than pretending it will work. Two things
-           reach this: the rolling table, which is not finished, and (once it is)
-           an offline copy of it, which has no origin a relay would accept. */
+        /* Greyed out and inert rather than pretending it will work: the rolling
+           table on a copy opened off the disk, which has no origin to connect from. */
         a.card.disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -158,6 +157,9 @@
             color: var(--ghost);
             font-weight: 600;
         }
+
+        /* display:block above would otherwise beat the hidden attribute */
+        .wip-note[hidden] { display: none; }
 
         footer {
             color: var(--text-dim);
@@ -202,19 +204,18 @@
             <span class="title"><i class="fa-solid fa-map"></i> <span class="name">Map Maker</span></span>
             <p class="sub">Regions, towns and battle maps: paint terrain, place landmarks, routes and tokens.</p>
         </a>
-        <!-- Shipped greyed out and unclickable on purpose: the page exists but the
-             relay it needs is not deployed, so every join would fail. It gets its
-             href back in the same commit that turns the relay on. -->
-        <a class="card disabled" id="card-table" aria-disabled="true">
+        <!-- Live: with no relay deployed the table connects browsers directly
+             (src/table/peerTransport.ts). Greyed out only on a page opened off
+             the disk — see the script at the bottom. -->
+        <a class="card" id="card-table" href="rolling-table.html">
             <span class="title">
                 <i class="fa-solid fa-dice"></i>
                 <span class="name">Rolling Table</span>
-                <span class="wip-tag">Work in progress</span>
             </span>
             <p class="sub">A shared dice table: join with a lobby id and a password, and
                 everyone sees every roll.
-                <span class="wip-note">Not live yet &mdash; still being built. It needs a
-                    server of its own, which is not running, so this one stays closed.</span>
+                <span class="wip-note" id="table-offline-note" hidden>Needs the hosted site &mdash;
+                    open this copy from the web to play with others.</span>
             </p>
         </a>
     </nav>
@@ -225,12 +226,17 @@
         <p>A free, non-commercial fan tool.
             Pokerole is made by the <a href="https://www.pokeroleproject.com/">Pokerole Project</a>.</p>
     </footer>
-    <!-- The rolling-table card used to be greyed here, at runtime, for a page
-         opened off the disk. It now ships that way for everyone — it is not
-         finished — so there is nothing left to decide on load. Put the check
-         back alongside the href when the relay goes up: a shared lobby needs
-         the network by definition, and a file:// page has no origin a relay
-         would accept. -->
+    <!-- A shared lobby needs the network by definition, and a page opened off
+         the disk has no origin to meet anyone from: grey the table out there. -->
+    <script>
+        if (location.protocol === 'file:') {
+            var card = document.getElementById('card-table');
+            card.classList.add('disabled');
+            card.setAttribute('aria-disabled', 'true');
+            card.removeAttribute('href');
+            document.getElementById('table-offline-note').hidden = false;
+        }
+    </script>
 </body>
 
 </html>
