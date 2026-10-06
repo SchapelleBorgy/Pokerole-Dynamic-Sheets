@@ -1,0 +1,114 @@
+/* ---------------- Top bar ---------------- */
+.topbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.45rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--panel-strong);
+}
+
+.topbar .logo {
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1.05rem;
+}
+
+.topbar .logo i { color: var(--ghost-color); }
+
+.topbar .spacer { flex: 1; }
+
+/* Session file controls, top right. Fixed size: on a narrow window it
+   is the status text beside them that gives way, never the buttons. */
+.session-actions { display: flex; align-items: center; gap: 0.35rem; flex: 0 0 auto; }
+
+/* Which file Quick Save writes to */
+.session-status {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.8;
+    min-width: 0;
+    max-width: 22rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.session-status.warn { color: #fca5a5; opacity: 1; }
+
+.topbar .version {
+    font-family: 'Fira Code', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+#data-missing {
+    display: none;
+    flex: 0 0 auto;
+    background: #7f1d1d;
+    color: #fecaca;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+}
+
+
+/* ---------------- Section toggles ----------------
+   One per board section, sitting with the title. Lit means the section is
+   on the board; clicking drops it, and the panels left over share the room
+   it was taking. */
+.section-toggles {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.6rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border-color);
+    flex: 0 0 auto;
+}
+
+.section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: #00000033;
+    /* Off reads as off: dim, flat, and no glow. */
+    color: var(--text-muted);
+    opacity: 0.5;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.section-toggle:hover {
+    opacity: 0.85;
+    border-color: var(--ghost-color);
+}
+
+.section-toggle.on {
+    background: var(--primary-soft);
+    border-color: var(--ghost-color);
+    color: var(--ghost-color);
+    opacity: 1;
+    box-shadow: 0 0 8px var(--border-glow);
+}
+
+/* Nothing left on the board — the only way back is the toggles above, so
+   the message has to say where they are. */
+.board-empty {
+    margin: auto;
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    max-width: 22rem;
+    line-height: 1.5;
+}

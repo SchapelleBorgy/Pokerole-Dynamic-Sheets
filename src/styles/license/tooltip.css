@@ -1,0 +1,10 @@
+/* The License's light themes: the shared tooltip (shared/tooltip.css)
+   assumes a dark page, so the shadow and hairline get the light treatment. */
+:root.light-theme #app-tooltip {
+    border-color: #00000024;
+    box-shadow: 0 8px 24px #0000002e, 0 0 14px 1px var(--border-glow);
+}
+
+:root.light-theme #app-tooltip::after {
+    border-color: #00000024;
+}

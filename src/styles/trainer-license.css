@@ -1,0 +1,27 @@
+/* The Trainer's License page. `shared.css` first: the quadrant rules below
+   override it in places and depend on landing afterwards. */
+@import './shared.css';
+@import './license/layout.css';
+@import './license/quadrant-license.css';
+@import './license/equipment.css';
+@import './license/gear-catalog.css';
+@import './license/quadrant-stats.css';
+@import './license/quadrant-team.css';
+@import './license/pc-storage.css';
+@import './license/quadrant-bag.css';
+@import './license/light-theme.css';
+@import './license/trainer-switcher.css';
+@import './shared/tooltip.css';
+@import './license/tooltip.css';
+@import './app-root.css';
+
+/* The mobile / tablet wrapper, last so it settles ties against the desktop
+   rules above rather than needing to out-specify them. Every rule in it is
+   behind a data-device or data-pointer attribute that a desktop never has. */
+@import './responsive/base.css';
+@import './responsive/sheets.css';
+
+/* The "new version is ready" bar, on every page that registers a worker. */
+@import './shared/update-prompt.css';
+@import './shared/pick-reorder.css';
+@import './shared/scrollbars.css';

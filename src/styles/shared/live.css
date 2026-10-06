@@ -1,0 +1,87 @@
+/* Live sheets: the status pill (every page that syncs), the license's Live
+   button dot, and the Live window. Themed off the same tokens as the update
+   prompt so it sits in whichever palette the page is in. */
+#live-pill {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    z-index: 160;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font: 600 0.78rem Outfit, sans-serif;
+    color: var(--text-primary, #fff);
+    background: var(--panel-strong, #0b0713e6);
+    border: 1px solid var(--border-color, #ffffff33);
+    box-shadow: 0 2px 12px #00000080;
+}
+
+#live-pill .dot,
+.live-btn .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f59e0b;
+}
+
+#live-pill.ok .dot,
+.live-btn.ok .live-dot {
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e;
+}
+
+#live-pill.err .dot,
+.live-btn.err .live-dot { background: #ef4444; }
+
+.live-btn { position: relative; }
+
+.live-btn .live-dot {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    display: none;
+}
+
+.live-btn.on .live-dot { display: block; }
+
+.live-code {
+    font: 700 1.6rem/1.2 'Fira Code', monospace;
+    letter-spacing: 0.12em;
+    text-align: center;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px dashed var(--border-color, #ffffff44);
+    user-select: all;
+}
+
+.live-input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border-radius: 8px;
+    /* 16px: smaller makes iOS zoom the page on focus */
+    font: 600 16px Outfit, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: transparent;
+    color: inherit;
+    border: 1px solid var(--border-color, #ffffff44);
+}
+
+.live-row { display: flex; gap: 8px; }
+.live-row > .form-btn { flex: 1; }
+.live-sub { font-size: 0.78rem; opacity: 0.75; text-align: center; margin: 6px 0 0; }
+.live-sep { border: 0; border-top: 1px solid var(--border-color, #ffffff22); margin: 14px 0; }
+.live-list { margin: 0 0 6px; padding: 0; list-style: none; font-size: 0.85rem; }
+
+.live-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}

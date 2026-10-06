@@ -1,0 +1,136 @@
+import type { CardSheet } from '../card/types';
+import type { GmFolder } from './folders';
+import type { GmGenOpts } from './generator';
+
+/* The GM screen's own saved state.
+
+   It goes to localStorage across reloads and, in fuller form, into a session
+   .json the GM can keep beside the campaign. Trainers are held by id only here
+   — their data lives in the shared working set the Trainer License writes — so a
+   session file carries copies of them instead. */
+
+export interface GmWild {
+    gid: string;
+    dexId: string;
+    sheet: CardSheet;
+    /** Whether this wild has been pushed to a card tab. */
+    pushed?: boolean;
+    /** The card's id for the pushed sheet (`<dexId>.<gid>`), minted on the first
+        push. Absent on a wild pushed before ids existed, which the card still
+        finds under its species id — see wildKey(). Two wilds of one species
+        used to share that key and overwrite each other. */
+    wid?: string;
+}
+
+export interface GmNoteSheet {
+    gid: string;
+    title: string;
+    body: string;
+    open: boolean;
+    /** Which folder it is filed under; absent or unknown means unfiled. */
+    folder?: string | null;
+}
+
+export interface GmNpc {
+    gid: string;
+    name: string;
+    gender: string;
+    region: string;
+    note: string;
+    nature?: string;
+}
+
+export interface GmCombatant {
+    gid: string;
+    /** How to find the live sheet: a trainer, one of their Pokémon, or a wild. */
+    ref?: { kind: string; trainerId?: string; uid?: string; gid?: string };
+    name?: string;
+    initiative?: number;
+    actions?: number;
+    /** Clash and Evasion are once per Round each, whichever of the two Clash
+        pools was used, so the tracker carries a mark for each rather than a
+        count. Cleared when the Round advances, exactly as the action pips are. */
+    usedClash?: boolean;
+    usedEva?: boolean;
+    [key: string]: unknown;
+}
+
+/** One fight. A session holds a list of them, because a party that splits up
+    is running two initiative orders at once and one round counter cannot
+    describe both. */
+export interface GmCombat {
+    gid: string;
+    /** What the panel's head is titled; the GM renames it. */
+    name: string;
+    round: number;
+    participants: GmCombatant[];
+}
+
+export interface GmDice {
+    count: number;
+    sides: number;
+    history: unknown[];
+    /** Show a pool's successes first and the rest after them. Display only:
+        the stored faces keep the order they were rolled in. */
+    sortResults?: boolean;
+}
+
+export interface GmNameOpts {
+    region: string;
+    gender: string;
+    letter: string;
+    withNature: boolean;
+}
+
+/** order: the panels left to right. widths: key -> pixels for the ones pinned
+    to a size of their own; a key that is absent grows and shrinks with the
+    window as before. hidden: the panels switched off from the top bar, which
+    are not rendered at all so the rest take their room. */
+export interface GmLayout {
+    order: string[];
+    widths: Record<string, number>;
+    hidden: string[];
+}
+
+export interface GmState {
+    /** ids shown in the roster; data lives in the shared working set.
+
+        NOTE: this array's ORDER is load-bearing — `t:<index>` tokens address a
+        trainer by its position in it, and the combat tracker and the ailment
+        popover both resolve through those. Rearranging the roster on screen
+        therefore goes through `rosterOrder`, never through here. */
+    trainerIds: string[];
+    wilds: GmWild[];
+    /** How the roster is arranged on screen: entry keys (`t:<trainerId>` and
+        `w:<gid>`) in display order, folders first-class alongside them.
+        Purely presentational, which is exactly why it is separate. */
+    rosterOrder: string[];
+    rosterFolders: GmFolder[];
+    /** entry key -> folder gid */
+    rosterFolderOf: Record<string, string>;
+    noteFolders: GmFolder[];
+    /** The fights running at once, one board panel each. Never empty: the
+        board always offers a tracker, and an empty list would leave the GM
+        with no way to make one. */
+    combats: GmCombat[];
+    /** Which of them the roster's "add to combat" buttons drop into. */
+    combatFocus: string;
+    /** legacy single note; migrated into noteSheets */
+    notes: string;
+    noteSheets: GmNoteSheet[];
+    npcs: GmNpc[];
+    dice: GmDice;
+    /** trainerId -> bool */
+    expanded: Record<string, boolean>;
+    nameOpts: GmNameOpts;
+    /** The random Pokémon generator's settings. */
+    genOpts: GmGenOpts;
+    /** What it has rolled and the GM has not yet kept or discarded. The same
+        shape as a roster wild, because keeping one is a move between the two
+        lists and nothing else. */
+    generated: GmWild[];
+    /** Dex numbers of its last rolls, newest first, so a species sits out
+        the next RECENT_ROLLS draws. */
+    genRecent: number[];
+    layout: GmLayout;
+}

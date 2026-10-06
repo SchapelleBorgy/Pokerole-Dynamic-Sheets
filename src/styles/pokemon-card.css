@@ -1,0 +1,37 @@
+/* The Pokémon card.
+
+   Its own copy of the rules, not a re-use of the trainer sheet's: the two
+   stylesheets started as one and have drifted since — about a fifth of the
+   overlapping block differs, mostly in the pools, the sprite box and the light
+   theme. Sharing them would change how one of the two pages looks, so each
+   keeps what it had. Split out of the original inline <style> verbatim; import
+   order is the order they appeared in, because plenty of them rely on it. */
+@import './card/base.css';
+@import './card/layout.css';
+@import './card/sprite-viewer.css';
+@import './card/header.css';
+@import './card/wild-switcher.css';
+@import './card/browser-and-themes.css';
+@import './card/type-chart.css';
+@import './card/trackers.css';
+@import './card/status.css';
+@import './card/stats.css';
+@import './card/skills-abilities.css';
+@import './card/dex-details.css';
+@import './card/moves-ui.css';
+@import './card/move-cards.css';
+@import './card/notepad.css';
+@import './shared/tooltip.css';
+@import './card/light-theme.css';
+@import './app-root.css';
+
+/* The mobile / tablet wrapper, last so it settles ties against the desktop
+   rules above rather than needing to out-specify them. Every rule in it is
+   behind a data-device or data-pointer attribute that a desktop never has. */
+@import './responsive/base.css';
+@import './responsive/sheets.css';
+
+/* The "new version is ready" bar, on every page that registers a worker. */
+@import './shared/update-prompt.css';
+@import './shared/pick-reorder.css';
+@import './shared/scrollbars.css';

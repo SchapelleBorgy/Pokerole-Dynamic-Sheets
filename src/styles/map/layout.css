@@ -1,0 +1,231 @@
+/* ---------------- Page layout ---------------- */
+
+.map-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
+.map-topbar { gap: 0.6rem; flex-wrap: nowrap; }
+
+.map-topbar .logo { flex: 0 0 auto; }
+
+/* Which map is open; opens the list. Shrinks before anything else does. */
+.map-name-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    max-width: 18rem;
+    flex: 0 1 auto;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.map-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.map-styles {
+    display: flex;
+    gap: 0.25rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border-color);
+    flex: 0 0 auto;
+}
+
+/* The words on the bar's buttons go first when the window narrows; the
+   glyphs stay, and each button keeps its hint. The bar is exactly full at
+   about 1480px with the words showing; any narrower and .map-settings (which
+   may shrink, though its buttons cannot) is painted over by the next group. */
+@media (max-width: 1480px) {
+    .map-btn-text { display: none; }
+}
+
+/* ---------------- Tool rail ---------------- */
+
+.map-rail {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.5rem 0.35rem;
+    border-right: 1px solid var(--border-color);
+    background: var(--panel-strong);
+    overflow-y: auto;
+}
+
+.map-tool {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+}
+
+.map-tool:disabled { opacity: 0.35; cursor: default; }
+
+.map-rail-sep {
+    width: 70%;
+    height: 1px;
+    background: var(--border-color);
+    margin: 0.2rem 0;
+    flex: 0 0 auto;
+}
+
+/* ---------------- Side panel ---------------- */
+
+.map-side {
+    flex: 0 0 290px;
+    width: 290px;
+    border-left: 1px solid var(--border-color);
+    background: var(--panel-strong);
+    overflow-y: auto;
+    padding: 0.4rem 0.7rem 1rem;
+}
+
+/* ---------------- Top-bar settings ---------------- */
+
+.map-settings {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border-color);
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+/* A toggle with a caret beside it that opens its settings. */
+.map-split { display: inline-flex; flex: 0 0 auto; }
+.map-split > button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.map-split-caret {
+    border-left: 0;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+}
+
+.map-value-btn {
+    font-family: 'Fira Code', monospace;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.map-scale-btn { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 0.35rem; max-width: 12rem; }
+.map-scale-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------------- Popovers ---------------- */
+
+.map-popover {
+    position: fixed;
+    z-index: 120;
+    min-width: 14rem;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    overflow-y: auto;
+    padding: 0.7rem 0.8rem;
+    background: var(--panel-strong);
+    border: 1px solid var(--ghost-color);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px #000c;
+    font-size: 0.8rem;
+}
+
+.map-popover-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.55rem;
+}
+
+.map-popover .map-hint { margin-top: 0.4rem; max-width: 20rem; }
+.map-popover .map-field select,
+.map-popover .map-field input[type="text"],
+.map-popover .map-field input[type="number"] { width: 100%; }
+.map-popover .map-field-row .map-field { min-width: 5rem; }
+.map-popover input[type="range"] { accent-color: var(--accent); }
+
+.map-popover-go { width: 100%; margin-top: 0.6rem; padding: 0.45rem; font-size: 0.82rem; }
+.map-popover-go:disabled { opacity: 0.45; cursor: default; }
+
+.map-export-pop { width: 21rem; }
+.map-export-folder { margin: 0.3rem 0 0.2rem; }
+.map-export-folder button { margin-top: 0.4rem; }
+.map-warn { color: #fca5a5; opacity: 1; }
+.map-scale-input { min-width: 14rem; }
+
+/* The style picker. */
+.map-style-btn { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; flex: 0 0 auto; }
+.map-style-list { display: flex; flex-direction: column; gap: 0.3rem; min-width: 17rem; }
+
+.map-style-choice {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.45rem 0.6rem;
+    text-align: left;
+    white-space: normal;
+}
+
+.map-style-choice > i { width: 1.2rem; text-align: center; color: var(--accent); font-size: 1rem; }
+.map-style-choice > span { display: flex; flex-direction: column; gap: 0.1rem; }
+.map-style-choice strong { font-size: 0.84rem; }
+.map-style-choice .muted { font-size: 0.72rem; }
+.map-style-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-faint); }
+
+/* The background picker. */
+.map-bg-btn { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; flex: 0 0 auto; }
+.map-bg-chip { width: 20px; height: 14px; border-radius: 4px; border: 1px solid #0008; flex: 0 0 auto; }
+.map-bg-chip.pixelated { image-rendering: pixelated; }
+.map-bg-pop { width: 20rem; }
+.map-bg-group-name { font-size: 0.68rem; font-weight: 600; color: var(--text-secondary); margin: 0.55rem 0 0.25rem; }
+
+/* Borders: the map's look, the blend width, each terrain's own. */
+.map-borders-btn { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; flex: 0 0 auto; }
+.map-borders-pop { width: 21rem; }
+.map-borders-pop .map-field + .map-field { margin-top: 0.5rem; }
+.map-borders-terrains { margin-top: 0.6rem; }
+.map-borders-terrains summary { cursor: pointer; font-weight: 600; font-size: 0.78rem; padding: 0.2rem 0; }
+.map-borders-terrains ul { list-style: none; margin: 0.35rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.map-borders-terrains li { display: flex; align-items: center; gap: 0.45rem; }
+.map-borders-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.76rem; }
+.map-borders-terrains select {
+    flex: 0 0 7.5rem;
+    width: 7.5rem;
+    font-size: 0.74rem;
+    padding: 0.15rem 0.3rem;
+    font-family: inherit;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    background: var(--panel-solid);
+}
+.map-borders-terrains select option { background: var(--panel-solid); color: var(--text-primary); }
+.map-popover kbd {
+    font-family: 'Fira Code', monospace;
+    font-size: 0.7rem;
+    padding: 0 0.3rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+/* Undo and redo, just before the style picker. */
+.map-history {
+    display: flex;
+    gap: 0.25rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border-color);
+    flex: 0 0 auto;
+}
+
+.map-history .icon-btn:disabled { opacity: 0.35; cursor: default; }
