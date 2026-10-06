@@ -1,7 +1,7 @@
 import { joinRoom as nostrJoinRoom } from '@trystero-p2p/nostr';
 import type { DataPayload, JoinRoom, NostrRoomConfig, Room } from '@trystero-p2p/nostr';
 import { WORKING_KEY } from '../state/constants';
-import { applyOps, diff } from './patch';
+import { applyOps, cleanJson, diff, parseOps } from './patch';
 import type { Op } from './patch';
 
 import '../styles/shared/live.css';
@@ -23,7 +23,10 @@ import '../styles/shared/live.css';
 
 const LIVE_KEY = 'pokerole_live';        // LiveEntry[]: which rooms this browser is in
 const META_KEY = 'pokerole_live_meta';   // { tid: time of the last edit seen }
-const APP_ID = 'pokerole-dynamic-sheets-live-v1';
+const KEYS_KEY = 'pokerole_live_keys';   // { code: the room name and key worked out from it }
+/* v2: rooms are named and locked by a key stretched from the code (below),
+   so a device still on v1 simply never meets one on v2. */
+const APP_ID = 'pokerole-dynamic-sheets-live-v2';
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const DIFF_DELAY_MS = 120;
 
@@ -59,7 +62,8 @@ interface Hello { tid: string | null; role: string; name: string; lastEdit: numb
 interface OpsMsg { tid: string; ts: number; ops: Op[] }
 
 interface RoomState {
-    room: Room;
+    /** Null for the moment between deciding to join and the key being ready. */
+    room: Room | null;
     sendHello: (d: Hello, opts?: { target?: string }) => Promise<void>;
     sendOps: (d: OpsMsg) => Promise<void>;
     peers: Set<string>;
@@ -118,6 +122,52 @@ export function normalizeCode(raw: string | null | undefined): string | null {
 export function shareLink(code: string): string {
     const base = location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '');
     return base + 'trainer-license.html#live=' + code;
+}
+
+/* The room's name and its key, from the code.
+
+   The code is the only secret, and it is short enough to type: 8 characters,
+   about 40 bits. Used as-is, the room name the public relays see would let
+   someone collect those names and try every code against them offline, which
+   one good graphics card does in under a minute. So the code goes through
+   PBKDF2 first, and every guess has to pay for 600,000 rounds of it: the same
+   search then takes that card about a year. Two devices with the same code
+   still arrive at the same room.
+
+   Worked out once per code per browser (under a second on a laptop, a second
+   or two on a phone) and kept beside the live list, which already holds the
+   code itself. */
+const KDF_ITERATIONS = 600_000;
+interface RoomKeys { room: string; pass: string }
+const keyJobs = new Map<string, Promise<RoomKeys>>();
+
+function roomKeys(code: string): Promise<RoomKeys> {
+    let job = keyJobs.get(code);
+    if (!job) {
+        job = deriveRoomKeys(code);
+        keyJobs.set(code, job);
+        job.catch(() => keyJobs.delete(code));
+    }
+    return job;
+}
+
+async function deriveRoomKeys(code: string): Promise<RoomKeys> {
+    const saved = readJSON<Record<string, RoomKeys>>(KEYS_KEY, {})[code];
+    if (saved && typeof saved.room === 'string' && typeof saved.pass === 'string') return saved;
+    const enc = new TextEncoder();
+    const material = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits(
+        { name: 'PBKDF2', salt: enc.encode('pokerole-live-room-v2'), iterations: KDF_ITERATIONS, hash: 'SHA-256' },
+        material, 512));
+    const hex = Array.from(bits, (b) => b.toString(16).padStart(2, '0')).join('');
+    const keys = { room: hex.slice(0, 64), pass: hex.slice(64) };
+    /* Only codes still in use are kept */
+    const inUse = new Set(liveEntries().map((e) => e.code));
+    const all = readJSON<Record<string, RoomKeys>>(KEYS_KEY, {});
+    const next: Record<string, RoomKeys> = { [code]: keys };
+    for (const [c, k] of Object.entries(all)) if (inUse.has(c)) next[c] = k;
+    writeJSON(KEYS_KEY, next);
+    return keys;
 }
 
 /* The transport is swappable so the test harness can use a local relay. */
@@ -241,13 +291,30 @@ export class LiveEngine {
 
     /* ---- Rooms ---- */
     private joinRoom(code: string): void {
+        const state: RoomState = {
+            room: null, peers: new Set<string>(), error: null,
+            sendHello: async () => { /* not connected yet */ },
+            sendOps: async () => { /* not connected yet */ },
+        };
+        this.rooms.set(code, state);
+        roomKeys(code).then((keys) => {
+            /* Left again (Stop, or the trainer closed) while the key was worked out */
+            if (this.rooms.get(code) !== state) return;
+            this.openRoom(code, state, keys);
+        }, (err) => {
+            console.warn('Live sheets: key', err);
+            state.error = 'could not prepare the connection';
+            this.changed();
+        });
+    }
+
+    private openRoom(code: string, state: RoomState, keys: RoomKeys): void {
         const cfg = {
             appId: APP_ID,
-            password: 'pokerole:' + code,
+            password: keys.pass,
             ...((window as unknown as { PokeroleLiveConfig?: object }).PokeroleLiveConfig || {}),
         };
-        const state = { peers: new Set<string>(), error: null } as unknown as RoomState;
-        const room = transport()(cfg, 'pokerole-' + code, {
+        const room = transport()(cfg, 'pokerole-' + keys.room, {
             onJoinError: (d) => {
                 state.error = String((d && d.error) || 'connection failed');
                 console.warn('Live sheets:', d);
@@ -259,7 +326,6 @@ export class LiveEngine {
         state.room = room;
         state.sendHello = (d, opts) => hello.send(d as unknown as DataPayload, opts);
         state.sendOps = (d) => ops.send(d as unknown as DataPayload);
-
         room.onPeerJoin = (peerId) => {
             state.peers.add(peerId);
             state.error = null;
@@ -273,27 +339,33 @@ export class LiveEngine {
             }, { target: peerId });
         };
         room.onPeerLeave = (peerId) => { state.peers.delete(peerId); this.changed(); };
-        hello.onMessage = (h) => this.onHello(code, h as unknown as Hello);
+        hello.onMessage = (h) => this.onHello(code, parseHello(h));
         ops.onMessage = (raw) => {
-            const m = raw as unknown as OpsMsg;
-            if (!m || !Array.isArray(m.ops)) return;
+            /* Anything from another device is checked before it touches the
+               working set: see parseOps */
+            const m = raw as unknown as Record<string, unknown>;
+            if (!m || typeof m !== 'object' || typeof m.tid !== 'string') return;
+            const list = parseOps(m.ops);
+            if (!list) return;
+            const tid = m.tid;
+            const ts = typeof m.ts === 'number' && Number.isFinite(m.ts) ? m.ts : 0;
             const e = liveEntries().find((x) => x.code === code);
-            if (!e || e.tid !== m.tid || !this.adapter.hasTrainer(m.tid)) return;
-            this.adapter.apply(m.tid, (data) => { applyOps(data, m.ops); return data; }, false);
-            this.base.set(m.tid, JSON.stringify(this.adapter.read(m.tid)));
-            if (m.ts) setMeta(m.tid, m.ts);
+            if (!e || e.tid !== tid || !this.adapter.hasTrainer(tid)) return;
+            this.adapter.apply(tid, (data) => { applyOps(data, list); return data; }, false);
+            this.base.set(tid, JSON.stringify(this.adapter.read(tid)));
+            if (ts) setMeta(tid, ts);
         };
-        this.rooms.set(code, state);
+        this.changed();
     }
 
     private leaveRoom(code: string): void {
         const r = this.rooms.get(code);
         if (!r) return;
-        void r.room.leave().catch(() => { /* already gone */ });
+        if (r.room) void r.room.leave().catch(() => { /* already gone */ });
         this.rooms.delete(code);
     }
 
-    private onHello(code: string, h: Hello): void {
+    private onHello(code: string, h: Hello | null): void {
         if (!h || !h.tid) return;
         const list = liveEntries();
         const e = list.find((x) => x.code === code);
@@ -410,6 +482,27 @@ export class LiveEngine {
         pill.querySelector('.txt')!.textContent = s.error ? 'Live · can’t connect'
             : s.peers ? 'Live · ' + s.peers + ' connected' : 'Live · waiting…';
     }
+}
+
+/** A hello from another device, checked and with the trainer copied clean,
+    or null if it is not one. */
+function parseHello(raw: unknown): Hello | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const h = raw as Record<string, unknown>;
+    if (h.tid !== null && typeof h.tid !== 'string') return null;
+    let data: TrainerData | null = null;
+    if (h.data !== null && h.data !== undefined) {
+        const c = cleanJson(h.data);
+        if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+        data = c as TrainerData;
+    }
+    return {
+        tid: h.tid as string | null,
+        role: h.role === 'host' ? 'host' : 'guest',
+        name: typeof h.name === 'string' ? h.name.slice(0, 80) : '',
+        lastEdit: typeof h.lastEdit === 'number' && Number.isFinite(h.lastEdit) ? h.lastEdit : 0,
+        data,
+    };
 }
 
 /* One engine per page */
