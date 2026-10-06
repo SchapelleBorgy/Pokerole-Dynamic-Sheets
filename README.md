@@ -82,6 +82,15 @@ The Core Books version 1.25 and 3.0 already have pre-set bookmarks toward the mo
 - Point "Open working folder" at a directory that holds all your players' trainer files, then use the side arrows to move between sheets mid-session.
 - To make an encounter, open `pokemon-card.html`, create a wild Pokémon, and export it into `Wild Pokemons/`. Players capture it from their license into an open team slot — or straight into PC storage if their team is already full.
 
+**Live sheets (GM and player on the same sheet at once)**
+
+1. The GM opens the trainer, clicks the **Live** button (the broadcast tower next to Save All), and picks **Go live with this trainer**. That gives a code like `ABCD-2345` and a **Copy link** button.
+2. The player opens the link, or opens `trainer-license.html`, picks **Join a live sheet**, and types the code. Their device loads the trainer straight from the GM's, so it works on a phone with no files.
+3. From then on, an edit on either device shows up on the other within a moment, including the Pokémon cards opened from the team.
+4. Each player gets their own code, so the GM can have several trainers live at once. **Stop** in the same window ends it.
+
+Devices connect to each other directly (WebRTC through [Trystero](https://github.com/dmotz/trystero), which finds the other device through public Nostr relays), so there's no account and no server to run. The GM's JSON files are still the real save: keep using **Save All**, and a player can keep a copy with the backup button. If two devices reconnect after editing apart, the copy edited most recently wins. A few strict networks (some school, office or mobile networks) block direct connections; if the dot stays amber or turns red, try another network.
+
 ## Under the hood
 
 Plain HTML, CSS, and JavaScript — no framework, no build step, nothing to install. The game data lives in `app-data/` as pre-built JS bundles (`pokedex-db.js`, `moves-db.js`, `abilities-db.js`, `items-db.js`, `natures-db.js`, `equip-icons-db.js`, `equip-icons-mono-db.js`, `sprite-frames-db.js`). Fonts are Outfit and Fira Code from Google Fonts; icons are FontAwesome 6.4.
