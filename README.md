@@ -90,6 +90,7 @@ The Core Books version 1.25 and 3.0 already have pre-set bookmarks toward the mo
 2. The player opens the link, or opens `trainer-license.html`, picks **Join a live sheet**, and types the code. Their device loads the trainer straight from the GM's, so it works on a phone with no files.
 3. From then on, an edit on either device shows up on the other within a moment, including the Pokémon cards opened from the team and the GM screen.
 4. Each player gets their own code, so the GM can have several trainers live at once. **Stop** in the same window ends it.
+5. The code is the key: anyone who has it can see and edit that trainer. Send it privately, and press **Stop** when the session ends.
 
 Devices connect to each other directly (WebRTC through [Trystero](https://github.com/dmotz/trystero), which finds the other device through public Nostr relays), so there's no account and no server to run. The GM's JSON files are still the real save: keep using **Save All**, and a player can keep a copy with the backup button. If two devices reconnect after editing apart, the copy edited most recently wins. A few strict networks (some school, office or mobile networks) block direct connections; if the dot stays amber or turns red, try another network.
 
