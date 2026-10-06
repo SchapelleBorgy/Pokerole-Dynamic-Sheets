@@ -2,6 +2,8 @@
 
 Character sheets and a wild-encounter builder for the [Pokerole](https://www.pokeroleproject.com/) tabletop RPG, running entirely in your browser. There are two pages — one for trainers, one for individual Pokémon — and they talk to each other. No install, no sign-up, no server. Your data stays in plain `.json` files on your own computer. The app is developed with the dataset version 3.0 and the manual version of reference is the 3.0, but almost everything can be manually changed and adapted to other versions.
 
+**[Open it in your browser →](https://tearmoon96.github.io/Pokerole-Dynamic-Sheets/)** — nothing to download, and it keeps working offline once you've opened it. Or grab a release to run it from your own disk.
+
 ## What's in here
 
 Two HTML files, each a standalone app:
@@ -86,16 +88,20 @@ The Core Books version 1.25 and 3.0 already have pre-set bookmarks toward the mo
 
 1. The GM opens the trainer, clicks the **Live** button (the broadcast tower next to Save All), and picks **Go live with this trainer**. That gives a code like `ABCD-2345` and a **Copy link** button.
 2. The player opens the link, or opens `trainer-license.html`, picks **Join a live sheet**, and types the code. Their device loads the trainer straight from the GM's, so it works on a phone with no files.
-3. From then on, an edit on either device shows up on the other within a moment, including the Pokémon cards opened from the team.
+3. From then on, an edit on either device shows up on the other within a moment, including the Pokémon cards opened from the team and the GM screen.
 4. Each player gets their own code, so the GM can have several trainers live at once. **Stop** in the same window ends it.
 
 Devices connect to each other directly (WebRTC through [Trystero](https://github.com/dmotz/trystero), which finds the other device through public Nostr relays), so there's no account and no server to run. The GM's JSON files are still the real save: keep using **Save All**, and a player can keep a copy with the backup button. If two devices reconnect after editing apart, the copy edited most recently wins. A few strict networks (some school, office or mobile networks) block direct connections; if the dot stays amber or turns red, try another network.
 
 ## Under the hood
 
-Plain HTML, CSS, and JavaScript — no framework, no build step, nothing to install. The game data lives in `app-data/` as pre-built JS bundles (`pokedex-db.js`, `moves-db.js`, `abilities-db.js`, `items-db.js`, `natures-db.js`, `equip-icons-db.js`, `equip-icons-mono-db.js`, `sprite-frames-db.js`). Fonts are Outfit and Fira Code from Google Fonts; icons are FontAwesome 6.4.
+React and TypeScript, built with Vite into three plain pages that run straight from disk — and install as a PWA, so it works offline once opened. The game data lives in `app-data/` as pre-built JS bundles (`pokedex-db.js`, `moves-db.js`, `abilities-db.js`, `items-db.js`, `natures-db.js`, `equip-icons-db.js`, `equip-icons-mono-db.js`, `sprite-frames-db.js`). Fonts are Outfit and Fira Code from Google Fonts; icons are FontAwesome 6.4.
 
-This branch carries the app and nothing else, so a download stays as small as it can while still working offline. The raw Pokerole dataset those bundles are compiled from, the Python scripts that compile it, and the two icon packs in full live on the **[`dev-data`](../../tree/dev-data)** branch — or in the developer zip attached to any release. None of it is needed to run the app. The clips above sit on **[`media`](../../tree/media)**, kept off this branch for the same reason.
+The pages are plain scripts rather than ES modules, which is what lets them open by double-clicking instead of needing a server.
+
+**Building it.** This folder is the finished app; the sources that build it are not in it. They live one level up, in the repository — see `ARCHITECTURE.md` there for the layout, the build and how the port is verified.
+
+This branch carries the app and nothing else, so a download stays as small as it can while still working offline. The raw Pokerole dataset those bundles are compiled from, the Python scripts that compile it, and the two icon packs in full live on the **[`dev-data`](../../../tree/dev-data)** branch — or in the developer zip attached to any release. None of it is needed to run the app. The clips above sit on **[`media`](../../../tree/media)**, kept off this branch for the same reason.
 
 ## Contact
 
