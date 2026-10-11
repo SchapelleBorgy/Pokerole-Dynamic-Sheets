@@ -11,6 +11,7 @@
 
 import { useMemo } from 'react';
 import { FallbackImage } from '../common/FallbackImage';
+import { SideScroll } from '../common/SideScroll';
 import { PoolBar } from '../gm/RosterBits';
 import { StatusChips } from '../gm/StatusChips';
 import { RollHistoryEntry, RollOutput } from '../gm/DicePanel';
@@ -44,10 +45,10 @@ export function PlayerCombat() {
     }
 
     return (
-        <div className="combat-board">
+        <SideScroll className="combat-board">
             {fights.map((f) => <FightPanel key={f.id} fight={f} />)}
             <GmDice fights={fights} />
-        </div>
+        </SideScroll>
     );
 }
 

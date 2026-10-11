@@ -97,6 +97,9 @@ html[data-device="phone"] .board {
     overflow-x: hidden;
 }
 
+/* One panel at a time leaves nothing to scroll to. */
+html[data-device="phone"] .side-arrow { display: none; }
+
 html[data-device="phone"] .board > .panel {
     display: none;
 }

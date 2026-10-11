@@ -12,6 +12,73 @@
     min-height: 0;
 }
 
+/* The frame the board sits in (components/common/SideScroll.tsx): it takes
+   the board's place in the page's column and holds the arrows over it, so
+   they stay put while the board slides under them. */
+.side-scroll {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+    display: flex;
+}
+
+.side-scroll > :first-child { min-width: 0; }
+
+/* Shown only while there is more board that way. Round and off to the
+   edge, over the board's own padding, so they cover as little of a panel
+   as they can. */
+.side-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 30;
+    width: 2.3rem;
+    height: 2.3rem;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-solid);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+    box-shadow: 0 2px 14px #000a;
+    opacity: 0.85;
+    cursor: pointer;
+}
+
+.side-arrow:hover {
+    opacity: 1;
+    border-color: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.side-arrow.left { left: 0.25rem; }
+.side-arrow.right { right: 0.25rem; }
+
+/* The board's sideways bar, wider and on a track that can be seen: every
+   other scroller in the app keeps the slim trackless one from
+   shared/scrollbars.css, but this one is how far along the board you are. */
+.board::-webkit-scrollbar,
+.combat-board::-webkit-scrollbar { height: 12px; }
+
+.board::-webkit-scrollbar-track,
+.combat-board::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--border-color) 45%, transparent);
+    border-radius: 6px;
+    margin: 0 0.8rem;
+}
+
+.board::-webkit-scrollbar-thumb,
+.combat-board::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--ghost-color) 55%, transparent);
+    border-radius: 6px;
+}
+
+.board::-webkit-scrollbar-thumb:hover,
+.combat-board::-webkit-scrollbar-thumb:hover { background: var(--ghost-color); }
+
 /* Every panel grows by the same amount as the window widens: equal
    basis, equal grow factor. min-width is what keeps them readable on a
    narrow window instead — below five times this, the board scrolls

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { SideScroll } from '../common/SideScroll';
 import { useGm } from '../../gm/GmContext';
 import { useAppData } from '../../data/AppDataContext';
 import { TopBar } from './TopBar';
@@ -196,7 +197,7 @@ export function GmApp({ dataOk, embedded, combatActions }: {
                 throw away each panel's scroll position and any half-typed field
                 in it every time the GM glanced at another tab. */}
             <ActivePanelCtx.Provider value={onPhone ? active : null}>
-                <main className="board" id="board">
+                <SideScroll tag="main" className="board" id="board">
                     {shown.map(panelFor).filter(Boolean)}
                     {!shown.length && (
                         <div className="board-empty">
@@ -204,7 +205,7 @@ export function GmApp({ dataOk, embedded, combatActions }: {
                             icons beside the title.
                         </div>
                     )}
-                </main>
+                </SideScroll>
             </ActivePanelCtx.Provider>
 
             <MovePanel token={tipToken} onClose={() => setTipToken(null)} />
