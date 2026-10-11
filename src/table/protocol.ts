@@ -68,11 +68,32 @@ export interface WireCombatant {
     flags: { a: string; d: number; x: boolean }[];
 }
 
+/** One of the GM's own rolls, from the GM screen's dice history, made for
+    someone in a fight. Only the faces and what they were rolled against
+    travel: the label, total, successes and verdict are worked out again on
+    the player's screen by the same code the GM screen uses, so they always
+    describe the faces shown. */
+export interface WireGmRoll {
+    t: number;
+    sides: number;
+    vals: number[];
+    /** The flat part of a sum roll (Initiative), else null. */
+    bonus: number | null;
+    /** Successes struck out by the pain penalty. */
+    pain: number;
+    /** The target number an accuracy roll was made against. */
+    need: number | null;
+    who: string;
+    what: string;
+}
+
 export interface WireFight {
     id: string;
     name: string;
     round: number;
     rows: WireCombatant[];
+    /** The GM's rolls for anyone in this fight, newest first. */
+    rolls: WireGmRoll[];
 }
 
 export type Body =
@@ -133,6 +154,8 @@ export const LIMITS = {
     MAX_FIGHTS: 8,
     MAX_COMBATANTS: 40,
     MAX_COMBAT_NAME: 40,
+    /** Of the GM screen's 30-roll history, per fight. */
+    MAX_FIGHT_ROLLS: 12,
 
     /** Kept below the relay's own 32 KB ceiling. */
     MAX_WIRE_CHARS: 24 * 1024,

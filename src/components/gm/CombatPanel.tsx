@@ -15,7 +15,8 @@ import {
     MAX_ACTIONS, initOffset, roundFlags, syncRoundState,
 } from '../../gm/combat';
 import {
-    adjustPool, entityPool, entityRef, participantToken as sharedParticipantToken, resolveToken, writeStatus,
+    adjustPool, entityPool, entityRef, participantToken as sharedParticipantToken, resolveToken, storedToken,
+    writeStatus,
 } from '../../gm/entities';
 import { PoolBar } from './RosterBits';
 import type { GmCombat, GmCombatant } from '../../gm/types';
@@ -120,7 +121,9 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
         const bonus = ref.value('Dexterity') + ref.value('Alert');
         const mod = initOffset(ref.status);
         store.update((s) => {
-            const entry = roll(1, 6, { who: ref.name, what: 'Initiative', bonus }, CRIT_MARGIN);
+            const entry = roll(1, 6, {
+                who: ref.name, what: 'Initiative', bonus, tok: storedToken(s, token) || undefined, gid,
+            }, CRIT_MARGIN);
             const raw = entry.total - mod;
             s.dice = { ...s.dice, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
             s.combats = s.combats.map((c) => (c.gid === gid ? {

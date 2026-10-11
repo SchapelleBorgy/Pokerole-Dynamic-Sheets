@@ -33,6 +33,7 @@ export function DicePanel({ onReorder }: {
         store.update((s) => {
             const entry = roll(d.dice + extra, 6, {
                 who: from.who, what: what + (extra ? ' (critical)' : ''), pain: from.pain,
+                tok: from.tok, gid: from.gid,
             }, CRIT_MARGIN);
             s.dice = { ...s.dice, count: d.dice + extra, sides: 6,
                 history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
@@ -135,27 +136,7 @@ export function DicePanel({ onReorder }: {
                 </div>
                 <div id="roll-history">
                     {(history.slice(1) as RollEntry[]).map((e, i) => (
-                        <div className="roll-history-entry" key={e.t + '-' + i}>
-                            <span className="h-label">{e.label}</span>
-                            <span className="h-vals">
-                                {faceOrder(e.vals, e.succ != null, sorted).map((i) => e.vals[i]).join(' ')}
-                                {e.bonus != null && (e.bonus < 0 ? ' − ' + Math.abs(e.bonus) : ' + ' + e.bonus)}
-                            </span>
-                            <span className="h-total">
-                                = {e.total}
-                                {e.succ != null && (
-                                    <> · {e.net != null ? e.net : e.succ}✓{e.pain ? ' (−' + e.pain + ')' : ''}</>
-                                )}
-                            </span>
-                            {e.verdict && (
-                                <span
-                                    className={'h-verdict ' + VERDICTS[e.verdict].cls}
-                                    title={(e.who ? e.who + ' — ' : '') + (e.what || '')}
-                                >
-                                    {VERDICTS[e.verdict].label}
-                                </span>
-                            )}
-                        </div>
+                        <RollHistoryEntry key={e.t + '-' + i} entry={e} sorted={sorted} />
                     ))}
                 </div>
             </div>
@@ -163,10 +144,47 @@ export function DicePanel({ onReorder }: {
     );
 }
 
-function RollOutput({ entry, sorted, onRollDamage }: {
+/** One line of the history. `withCtx` puts who rolled and what above the
+    numbers, for a reader who did not make the roll (a player at the rolling
+    table); the GM made every one of theirs, and gets them on hover. */
+export function RollHistoryEntry({ entry: e, sorted, withCtx }: {
     entry: RollEntry;
     sorted: boolean;
-    onRollDamage: (from: RollEntry, extra: number) => void;
+    withCtx?: boolean;
+}) {
+    const ctx = [e.who, e.what].filter(Boolean).join(' · ');
+    return (
+        <div className={'roll-history-entry' + (withCtx ? ' with-ctx' : '')}>
+            {withCtx && ctx && <span className="h-ctx">{ctx}</span>}
+            <span className="h-label">{e.label}</span>
+            <span className="h-vals">
+                {faceOrder(e.vals, e.succ != null, sorted).map((i) => e.vals[i]).join(' ')}
+                {e.bonus != null && (e.bonus < 0 ? ' − ' + Math.abs(e.bonus) : ' + ' + e.bonus)}
+            </span>
+            <span className="h-total">
+                = {e.total}
+                {e.succ != null && (
+                    <> · {e.net != null ? e.net : e.succ}✓{e.pain ? ' (−' + e.pain + ')' : ''}</>
+                )}
+            </span>
+            {e.verdict && VERDICTS[e.verdict] && (
+                <span
+                    className={'h-verdict ' + VERDICTS[e.verdict].cls}
+                    title={(e.who ? e.who + ' — ' : '') + (e.what || '')}
+                >
+                    {VERDICTS[e.verdict].label}
+                </span>
+            )}
+        </div>
+    );
+}
+
+/** The latest roll in full. Without `onRollDamage` there is no damage
+    button, which is how a player sees it. */
+export function RollOutput({ entry, sorted, onRollDamage }: {
+    entry: RollEntry;
+    sorted: boolean;
+    onRollDamage?: (from: RollEntry, extra: number) => void;
 }) {
     const sides = parseInt(entry.label.split('d')[1], 10);
     const struck = painStruck(entry.vals, entry.pain);
@@ -232,7 +250,7 @@ function RollOutput({ entry, sorted, onRollDamage }: {
                     {entry.verdict === 'fumble' && <span className="sub">the GM decides what it costs</span>}
                 </div>
             )}
-            {showFollowUp && entry.dmg && (
+            {showFollowUp && entry.dmg && onRollDamage && (
                 <button
                     className="roll-followup"
                     onClick={() => onRollDamage(entry, extra)}

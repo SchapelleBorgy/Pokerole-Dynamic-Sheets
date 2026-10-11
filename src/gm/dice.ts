@@ -26,6 +26,15 @@ export interface RollEntry {
     /** Carried so a hit can roll the damage in one more click. `what` names
         the damage roll; older entries without it fall back to the accuracy's. */
     dmg?: { token: string; mi: number; dice: number; what?: string } | null;
+    /** Whose roll it was, in the stored form (`T:<id>`, `M:<id>:<slot>`,
+        `w:<gid>`, `c:<pid>`) so it still names them after the roster moves.
+        It is what puts a roll in front of the players at the rolling table
+        who can see that subject's fight. A roll made on the dice panel itself
+        has none, and stays the GM's own. */
+    tok?: string;
+    /** The fight it was rolled for, when it was rolled from one. Settles a
+        subject who stands in two fights at once. */
+    gid?: string;
 }
 
 export type RollMeta = Partial<Omit<RollEntry, 'label' | 'vals' | 'total' | 'succ' | 'net' | 't'>>;
@@ -46,6 +55,14 @@ export function accuracyVerdict(succ: number, need: number, critMargin: number):
 /** Roll `count` dice of `sides`, and work out what it means. */
 export function roll(count: number, sides: number, meta: RollMeta, critMargin: number): RollEntry {
     const vals = Array.from({ length: count }, () => 1 + Math.floor(Math.random() * sides));
+    return scoreRoll(vals, sides, meta, critMargin);
+}
+
+/** What a set of faces means. Apart from `roll` so the rolling table can
+    redraw one of the GM's rolls on a player's screen from the faces alone,
+    with the same total, successes and verdict the GM saw. */
+export function scoreRoll(vals: number[], sides: number, meta: RollMeta, critMargin: number): RollEntry {
+    const count = vals.length;
     /* A sum roll adds a flat number to the faces and is NOT a pool: Initiative
        is 1d6 + Dexterity + Alert, one die however big the pools behind it are,
        and counting 4-6 on that one die would say nothing. `succ` stays null,

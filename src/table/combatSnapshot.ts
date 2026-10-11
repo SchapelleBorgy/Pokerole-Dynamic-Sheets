@@ -3,17 +3,20 @@
    Built on the GM's machine from the same helpers the combat panel draws with,
    so a player's row says exactly what the GM's row says: initiative with
    paralysis already applied, HP and Will read off the sheets, the ailments
-   that are on, and what each one costs this Round. Nothing else of the board
-   leaves the GM's browser: no roster, no notes, no NPCs, no sheets. */
+   that are on, and what each one costs this Round. With each fight go the
+   GM's rolls for anyone in it. Nothing else of the board leaves the GM's
+   browser: no roster, no notes, no NPCs, no sheets, and no roll made on the
+   dice panel itself. */
 
 import { activeAilments, defaultStatus } from '../gm/ailments';
 import { MAX_ACTIONS, initOffset, roundFlags } from '../gm/combat';
 import { combatGidOf, isCombatPanelKey } from '../gm/constants';
 import { entityPool, entityRef, participantToken, resolveToken } from '../gm/entities';
-import type { GmCombatant, GmState } from '../gm/types';
+import type { RollEntry } from '../gm/dice';
+import type { GmCombat, GmCombatant, GmState } from '../gm/types';
 import type { PokedexEntry } from '../data/types';
 import { LIMITS } from './protocol';
-import type { WireCombatant, WireFight } from './protocol';
+import type { WireCombatant, WireFight, WireGmRoll } from './protocol';
 
 /* The same shapes validate.ts accepts. Anything that would not pass there is
    replaced here rather than sent, because one bad field makes the players drop
@@ -69,6 +72,39 @@ function row(
     };
 }
 
+/** The GM's rolls for this fight, newest first: the ones rolled from it, and
+    otherwise the ones rolled for someone standing in it. */
+function fightRolls(
+    state: GmState, dexById: (id: string) => PokedexEntry | null, c: GmCombat,
+): WireGmRoll[] {
+    const here = new Set(c.participants.map((p) => resolveToken(state, participantToken(state, dexById, p))));
+    const out: WireGmRoll[] = [];
+    for (const e of state.dice.history as RollEntry[]) {
+        if (out.length >= LIMITS.MAX_FIGHT_ROLLS) break;
+        if (!e || typeof e !== 'object') continue;
+        const at = e.tok ? resolveToken(state, e.tok) : null;
+        const ours = e.gid ? e.gid === c.gid : !!at && here.has(at);
+        if (!ours) continue;
+        const sides = parseInt(String(e.label).split('d')[1], 10);
+        if (!(sides >= LIMITS.MIN_SIDES && sides <= LIMITS.MAX_SIDES)) continue;
+        if (!Array.isArray(e.vals) || !e.vals.length || e.vals.length > LIMITS.MAX_COUNT) continue;
+        if (!e.vals.every((v) => Number.isInteger(v) && v >= 1 && v <= sides)) continue;
+        const t = whole(e.t, 0, Number.MAX_SAFE_INTEGER);
+        if (t === null) continue;
+        out.push({
+            t,
+            sides,
+            vals: e.vals.slice(),
+            bonus: e.bonus == null ? null : whole(e.bonus, -999, 999),
+            pain: whole(e.pain, 0, LIMITS.MAX_COUNT) ?? 0,
+            need: e.need == null ? null : whole(e.need, 0, LIMITS.MAX_COUNT),
+            who: String(e.who || '').trim().slice(0, LIMITS.MAX_COMBAT_NAME),
+            what: String(e.what || '').trim().slice(0, LIMITS.MAX_NOTE),
+        });
+    }
+    return out;
+}
+
 /** Every fight on the board, in the order the GM has the panels. Who sees
     which is settled per player in session.ts, from fightAccess() below. */
 export function combatSnapshot(
@@ -89,6 +125,7 @@ export function combatSnapshot(
                 name: String(c.name || '').trim().slice(0, LIMITS.MAX_COMBAT_NAME) || 'Combat',
                 round,
                 rows: c.participants.map((p, j) => row(state, dexById, p, round, j)),
+                rolls: fightRolls(state, dexById, c),
             };
         });
 }

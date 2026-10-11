@@ -879,12 +879,17 @@ function clamp(v: number, min: number, max: number): number {
     this is for the GM who leaves forty wild Pokémon on one tracker. */
 function fitCombat(fights: WireFight[]): WireFight[] {
     const out = fights.slice(0, LIMITS.MAX_FIGHTS).map((f) => ({
-        ...f, rows: f.rows.slice(0, LIMITS.MAX_COMBATANTS),
+        ...f, rows: f.rows.slice(0, LIMITS.MAX_COMBATANTS), rolls: f.rolls.slice(0, LIMITS.MAX_FIGHT_ROLLS),
     }));
     /* Room left for the signed wrapper around the body: the key, the ids and
        the counters come to well under a kilobyte. */
     const budget = LIMITS.MAX_WIRE_CHARS - 2048;
     while (out.length && JSON.stringify(out).length > budget) {
+        /* The oldest rolls go before anyone's row does: the tracker is what
+           a player cannot do without. */
+        let r = out.length - 1;
+        while (r >= 0 && !out[r].rolls.length) r--;
+        if (r >= 0) { out[r] = { ...out[r], rolls: out[r].rolls.slice(0, -1) }; continue; }
         const last = out[out.length - 1];
         if (last.rows.length) last.rows = last.rows.slice(0, -1);
         else out.pop();

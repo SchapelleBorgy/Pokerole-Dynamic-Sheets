@@ -8,7 +8,7 @@ import { ailmentByKey } from '../../gm/ailments';
 import { ailmentRoll } from '../../gm/combat';
 import { ailmentText } from '../../gm/ailmentText';
 import {
-    clearAilment, cureProgress, entityRef, participantForToken,
+    clearAilment, cureProgress, entityRef, participantForToken, storedToken,
 } from '../../gm/entities';
 import { inkOn } from '../../lib/color';
 import type { PokedexEntry } from '../../data/types';
@@ -128,7 +128,10 @@ export function AilmentPopover() {
         if (!spec || spec.dice <= 0) return;
         let entrySucc = 0;
         store.update((s) => {
-            const entry = rollDice(spec.dice, 6, {}, CRIT_MARGIN);
+            const entry = rollDice(spec.dice, 6, {
+                who: subject.name, what: ail.name + ' roll (' + spec.label + ')',
+                tok: storedToken(s, pop.token) || undefined,
+            }, CRIT_MARGIN);
             entrySucc = entry.succ || 0;
             s.dice = { ...s.dice, count: spec.dice, sides: 6, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
         });

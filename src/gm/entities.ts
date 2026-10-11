@@ -72,6 +72,17 @@ export function resolveToken(state: GmState, token: string): string | null {
     return p[0] === 'T' ? 't:' + i : 'm:' + i + ':' + p[2];
 }
 
+/** The other way round: the stored form of a live token, for something kept
+    past this render (a roll in the dice history) that must still name the
+    same subject after the roster moves. null when the trainer has gone. */
+export function storedToken(state: GmState, token: string): string | null {
+    const p = String(token || '').split(':');
+    if (p[0] !== 't' && p[0] !== 'm') return token || null;
+    const id = trainerIdAt(state, +p[1]);
+    if (!id) return null;
+    return p[0] === 't' ? 'T:' + id : 'M:' + id + ':' + p[2];
+}
+
 export interface EntityRef {
     kind: 'trainer' | 'mon' | 'wild' | 'custom';
     token: string;

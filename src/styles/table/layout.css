@@ -218,6 +218,21 @@
     gap: 0.45rem;
 }
 
+/* The GM's rolls: narrower than a fight, since a roll is never wide. */
+.combat-board > .panel.gm-dice {
+    flex: 0 1 340px;
+    min-width: 280px;
+}
+
+/* Who rolled and what, on a line of its own above the numbers. */
+.roll-history-entry.with-ctx { flex-wrap: wrap; row-gap: 0.1rem; }
+.roll-history-entry .h-ctx {
+    flex: 0 0 100%;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
 /* Nothing on a player's row is a control. */
 .combat-row.read-only .pips,
 .combat-row.read-only .used-mark,
@@ -448,5 +463,6 @@ button.wide {
     .table-split.show-board .table-dock { display: none; }
 
     .combat-board { flex-direction: column; overflow-x: hidden; }
-    .combat-board > .panel { flex: 0 0 auto; min-width: 0; max-width: none; }
+    .combat-board > .panel,
+    .combat-board > .panel.gm-dice { flex: 0 0 auto; min-width: 0; max-width: none; }
 }

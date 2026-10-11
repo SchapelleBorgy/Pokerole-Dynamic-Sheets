@@ -1,5 +1,7 @@
 /* A player's view of the GM's combat trackers: the same rows the GM sees,
-   drawn from what the GM's browser sent, with nothing to press.
+   drawn from what the GM's browser sent, with nothing to press. Beside them,
+   the GM screen's dice panel, holding only the GM's rolls for someone in
+   those fights.
 
    The markup and class names are the combat panel's own, so the two read the
    same and gm/combat.css styles both. What is missing is every control: the
@@ -7,13 +9,18 @@
    evasion marks are marks rather than buttons, and the status chips do not
    cycle. The board is the GM's to change. */
 
+import { useMemo } from 'react';
 import { FallbackImage } from '../common/FallbackImage';
 import { PoolBar } from '../gm/RosterBits';
 import { StatusChips } from '../gm/StatusChips';
+import { RollHistoryEntry, RollOutput } from '../gm/DicePanel';
 import { useTable } from '../../table/TableContext';
 import { ailmentByKey, defaultStatus } from '../../gm/ailments';
 import type { GmStatus } from '../../gm/ailments';
 import { MAX_ACTIONS } from '../../gm/combat';
+import { CRIT_MARGIN } from '../../gm/constants';
+import { HISTORY_LIMIT, scoreRoll } from '../../gm/dice';
+import type { RollEntry } from '../../gm/dice';
 import { tileSpriteChain } from '../../lib/sprites';
 import type { WireCombatant, WireFight } from '../../table/protocol';
 
@@ -39,7 +46,60 @@ export function PlayerCombat() {
     return (
         <div className="combat-board">
             {fights.map((f) => <FightPanel key={f.id} fight={f} />)}
+            <GmDice fights={fights} />
         </div>
+    );
+}
+
+/** The GM's rolls for anyone in the fights this player can see, the latest
+    in full and the rest under it, drawn with the GM screen's own markup.
+    Each is scored again here from its faces by the GM screen's own code, so
+    the total, successes and verdict are the ones the GM saw. A roll for
+    someone standing in two of those fights shows once. */
+function GmDice({ fights }: { fights: WireFight[] }) {
+    const rolls = useMemo(() => {
+        const seen = new Set<string>();
+        const out: RollEntry[] = [];
+        for (const f of fights) {
+            for (const w of f.rolls) {
+                const key = w.t + ':' + w.sides + ':' + w.vals.join(',');
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const e = scoreRoll(w.vals, w.sides, {
+                    who: w.who || undefined, what: w.what || undefined,
+                    bonus: w.bonus, pain: w.pain || undefined, need: w.need,
+                }, CRIT_MARGIN);
+                e.t = w.t;
+                out.push(e);
+            }
+        }
+        return out.sort((a, b) => b.t - a.t).slice(0, HISTORY_LIMIT);
+    }, [fights]);
+
+    const [latest, ...rest] = rolls;
+    return (
+        <section className="panel gm-dice" data-panel-kind="dice">
+            <div className="panel-head">
+                <i className="fa-solid fa-dice panel-icon"></i>
+                <h2>GM’s dice</h2>
+            </div>
+            <div className="panel-body">
+                {latest
+                    ? <RollOutput entry={latest} sorted={false} />
+                    : (
+                        <div className="empty-note">
+                            No rolls yet. When the GM rolls for anyone in your fight, it shows up here.
+                        </div>
+                    )}
+                {!!rest.length && (
+                    <div className="gm-roll-history">
+                        {rest.map((e, i) => (
+                            <RollHistoryEntry key={e.t + '-' + i} entry={e} sorted={false} withCtx />
+                        ))}
+                    </div>
+                )}
+            </div>
+        </section>
     );
 }
 

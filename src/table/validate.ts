@@ -11,7 +11,7 @@
    to try. */
 
 import { LIMITS } from './protocol';
-import type { Body, Inner, WireCombatant, WireFight, WireMember, WireRoll } from './protocol';
+import type { Body, Inner, WireCombatant, WireFight, WireGmRoll, WireMember, WireRoll } from './protocol';
 import { AILMENTS } from '../gm/ailments';
 import { MAX_ACTIONS, ROUND_FLAGGED } from '../gm/combat';
 
@@ -192,9 +192,35 @@ function parseCombatant(raw: unknown): WireCombatant | null {
     };
 }
 
+function parseGmRoll(raw: unknown): WireGmRoll | null {
+    if (!isRecord(raw)) return null;
+    if (!exactly(raw, ['t', 'sides', 'vals', 'bonus', 'pain', 'need', 'who', 'what'])) return null;
+    const t = int(raw.t, 0, Number.MAX_SAFE_INTEGER);
+    const sides = int(raw.sides, LIMITS.MIN_SIDES, LIMITS.MAX_SIDES);
+    const bonus = intOrNull(raw.bonus, -999, 999);
+    const pain = int(raw.pain, 0, LIMITS.MAX_COUNT);
+    const need = intOrNull(raw.need, 0, LIMITS.MAX_COUNT);
+    if (t === null || sides === null || bonus === undefined || pain === null || need === undefined) return null;
+    if (typeof raw.who !== 'string' || typeof raw.what !== 'string') return null;
+    if (!Array.isArray(raw.vals) || raw.vals.length < LIMITS.MIN_COUNT || raw.vals.length > LIMITS.MAX_COUNT) {
+        return null;
+    }
+    const vals: number[] = [];
+    for (const v of raw.vals) {
+        const face = int(v, 1, sides);
+        if (face === null) return null;
+        vals.push(face);
+    }
+    return {
+        t, sides, vals, bonus, pain, need,
+        who: cleanText(raw.who, LIMITS.MAX_COMBAT_NAME),
+        what: cleanText(raw.what, LIMITS.MAX_NOTE),
+    };
+}
+
 function parseFight(raw: unknown): WireFight | null {
     if (!isRecord(raw)) return null;
-    if (!exactly(raw, ['id', 'name', 'round', 'rows'])) return null;
+    if (!exactly(raw, ['id', 'name', 'round', 'rows', 'rolls'])) return null;
     const id = idText(raw.id);
     const round = int(raw.round, 0, 99999);
     if (!id || round === null) return null;
@@ -205,7 +231,18 @@ function parseFight(raw: unknown): WireFight | null {
         if (!parsed) return null;
         rows.push(parsed);
     }
-    return { id, name: cleanText(raw.name, LIMITS.MAX_COMBAT_NAME) || 'Combat', round, rows };
+    /* Absent from a GM page from before rolls were shared: no rolls, rather
+       than no fight. */
+    const rolls: WireGmRoll[] = [];
+    if (raw.rolls !== undefined) {
+        if (!Array.isArray(raw.rolls) || raw.rolls.length > LIMITS.MAX_FIGHT_ROLLS) return null;
+        for (const r of raw.rolls) {
+            const parsed = parseGmRoll(r);
+            if (!parsed) return null;
+            rolls.push(parsed);
+        }
+    }
+    return { id, name: cleanText(raw.name, LIMITS.MAX_COMBAT_NAME) || 'Combat', round, rows, rolls };
 }
 
 export function parseBody(raw: unknown): Body | null {

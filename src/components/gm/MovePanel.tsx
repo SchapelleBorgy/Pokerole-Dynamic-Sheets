@@ -9,7 +9,7 @@ import {
 } from '../../gm/moves';
 import { resolvePoolValue } from '../../gm/pools';
 import {
-    entityPool, entityRef, participantForToken, trainerIdAt, wildLiveSheet,
+    entityPool, entityRef, participantForToken, storedToken, trainerIdAt, wildLiveSheet,
 } from '../../gm/entities';
 import { workingTrainerData } from '../../gm/workingSet';
 import { monShownName } from '../../gm/entities';
@@ -196,7 +196,7 @@ export function MovePanel({ token, onClose }: { token: string | null; onClose: (
            rolls follow. */
         if (!(dice > 0)) return;
         store.update((s) => {
-            const entry = roll(dice, 6, meta, CRIT_MARGIN);
+            const entry = roll(dice, 6, { ...meta, tok: storedToken(s, token) || undefined }, CRIT_MARGIN);
             s.dice = { ...s.dice, count: dice, sides: 6, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
         });
     };
