@@ -27,7 +27,8 @@ import type { Bytes } from './encoding';
 import { createHostIdentity, loadHostIdentity, memberIdentity } from './identity';
 import type { Identity } from './identity';
 import { HEARTBEAT_MS, LIMITS, PRESENCE_TIMEOUT_MS, PROTOCOL_VERSION, randomId } from './protocol';
-import type { Body, Inner, WireFight, WireMember, WireRoll } from './protocol';
+import type { Body, Inner, KitRoll, WireFight, WireKit, WireMember, WireRoll } from './protocol';
+import { checkClaims, makeClaims } from './claims';
 import { peerToPeer, roomUrl } from './relay';
 import { fabricateD6, fabricateTotal } from './scripted';
 import { RelayTransport } from './transport';
@@ -74,6 +75,10 @@ export interface TableState {
     /** The GM's combat trackers, as last received. Null until the first one
         arrives; always null on the host, whose board is the real thing. */
     combat: WireFight[] | null;
+    /** What this player may roll for themselves: their trainer and its
+        Pokémon, wherever they stand in a fight this player can see. Null
+        until the GM has sent any; always null on the host. */
+    kits: WireKit[] | null;
 
     /* Roll controls. */
     count: number;
@@ -106,6 +111,7 @@ function initialState(): TableState {
         pending: [],
         hostOnline: false,
         combat: null,
+        kits: null,
         count: 4,
         sides: 6,
         note: '',
@@ -187,6 +193,17 @@ interface Bucket { tokens: number; last: number }
 const BUCKET_MAX = 5;
 const BUCKET_REFILL_MS = 2000;
 
+/** Where the GM screen's side of a player's own rolls lives: what each player
+    may roll for, and making a roll they asked for. HostBoard provides it; the
+    session only knows who has proved they play which trainer. */
+export interface MoveHost {
+    kits(member: string, tids: readonly string[]): WireKit[];
+    act(member: string, tids: readonly string[], act: Extract<Body, { k: 'act' }>): void;
+}
+
+/** The live-sheet list, which says which trainers this browser plays. */
+const LIVE_LIST_KEY = 'pokerole_live';
+
 export class TableSession {
     readonly store = new TableStore();
 
@@ -240,6 +257,21 @@ export class TableSession {
     /* Host only: member id -> the connection their messages last came in on,
        so a message meant for one player goes to that player's browser alone. */
     private peerOf = new Map<string, string>();
+
+    /* Host only: member id -> the trainers they have proved they hold the
+       live sheet for; the claims last checked for each, so a heartbeat's
+       resend costs nothing; what each was last sent of their own moves; and
+       the GM screen's side of it. */
+    private controls = new Map<string, string[]>();
+    private claimSeen = new Map<string, string>();
+    private kitsSent = new Map<string, string>();
+    private kitTimer: number | null = null;
+    private moveHost: MoveHost | null = null;
+
+    /* Player only: the claims last sent, and the last move list received. */
+    private claimsJson = '[]';
+    private kitsJson = '';
+    private onLiveList: ((e: StorageEvent) => void) | null = null;
 
     /* ------------------------------------------------------------- joining */
 
@@ -318,6 +350,11 @@ export class TableSession {
         this.combatJson = '';
         this.combatSent.clear();
         this.peerOf.clear();
+        this.controls.clear();
+        this.claimSeen.clear();
+        this.kitsSent.clear();
+        this.claimsJson = '[]';
+        this.kitsJson = '';
         if (isHost) this.names.set(identity.id, name);
 
         saveSession({ lobbyId, password, name });
@@ -334,8 +371,19 @@ export class TableSession {
             s.pending = [];
             s.hostOnline = isHost;
             s.combat = null;
+            s.kits = null;
             s.error = '';
         });
+
+        /* Joining a trainer's live sheet in another tab, or leaving it, changes
+           what this player may roll for; tell the GM straight away rather than
+           at the next heartbeat. */
+        if (!isHost) {
+            this.onLiveList = (e: StorageEvent) => {
+                if (e.storageArea === localStorage && e.key === LIVE_LIST_KEY) void this.sendClaims();
+            };
+            window.addEventListener('storage', this.onLiveList);
+        }
 
         const handlers = {
             onMessage: (text: string, from?: string) => {
@@ -360,6 +408,14 @@ export class TableSession {
         if (this.combatTimer !== null) {
             clearTimeout(this.combatTimer);
             this.combatTimer = null;
+        }
+        if (this.kitTimer !== null) {
+            clearTimeout(this.kitTimer);
+            this.kitTimer = null;
+        }
+        if (this.onLiveList) {
+            window.removeEventListener('storage', this.onLiveList);
+            this.onLiveList = null;
         }
         this.transport?.stop();
         this.transport = null;
@@ -434,7 +490,24 @@ export class TableSession {
     }
 
     private announce(): Promise<boolean> {
-        return this.publish({ k: 'hello', name: this.store.state.myName });
+        const sent = this.publish({ k: 'hello', name: this.store.state.myName });
+        /* Every time, after the hello that introduces us: a GM who has just
+           reloaded has forgotten who plays what. */
+        void sent.then((ok) => { if (ok) void this.sendClaims(); });
+        return sent;
+    }
+
+    /** Which trainers this player holds the live sheet for, proved to the GM.
+        Sent while there are any, and once more when the last one goes, so the
+        GM stops offering moves for a sheet this player has left. */
+    private async sendClaims(): Promise<void> {
+        const s = this.store.state;
+        if (s.isHost || !this.room || s.phase !== 'live') return;
+        const claims = await makeClaims(this.room.addr, s.myId);
+        const json = JSON.stringify(claims);
+        if (!claims.length && this.claimsJson === '[]') return;
+        this.claimsJson = json;
+        await this.publish({ k: 'claim', claims });
     }
 
     private flushQueue(): void {
@@ -542,6 +615,8 @@ export class TableSession {
                and this is it. */
             if (body.k === 'hello') this.onHello(inner.f, body.name, inner.sid);
             else if (body.k === 'request') this.onRequest(inner.f, body);
+            else if (body.k === 'claim') this.onClaim(inner.f, body);
+            else if (body.k === 'act') this.onAct(inner.f, body);
             return;
         }
 
@@ -600,6 +675,15 @@ export class TableSession {
                 break;
             }
 
+            case 'moves': {
+                if (body.to !== this.store.state.myId) break;
+                const json = JSON.stringify(body.kits);
+                if (json === this.kitsJson) break;
+                this.kitsJson = json;
+                this.store.update((s) => { s.kits = body.kits; });
+                break;
+            }
+
             case 'kick':
                 if (body.id === this.store.state.myId) {
                     this.leave();
@@ -640,6 +724,39 @@ export class TableSession {
            updates and keeps the same page id, so "already greeted" says
            nothing about whether their board is current. */
         this.sendCombatTo(id, true);
+        if (this.controls.has(id)) this.sendKitsTo(id, true);
+    }
+
+    /** A player says which trainers they play. Checked against the live codes
+        this browser holds (claims.ts); anything that does not check out is
+        simply not theirs. */
+    private onClaim(id: string, body: Extract<Body, { k: 'claim' }>): void {
+        if (!this.names.has(id) || !this.room) return;
+        const json = JSON.stringify(body.claims);
+        if (this.claimSeen.get(id) === json) return;
+        this.claimSeen.set(id, json);
+        void checkClaims(this.room.addr, id, body.claims).then((tids) => {
+            /* Superseded by a newer claim while this one was being checked */
+            if (this.claimSeen.get(id) !== json || !this.names.has(id)) return;
+            if (tids.length) this.controls.set(id, tids);
+            else this.controls.delete(id);
+            this.sendKitsTo(id, true);
+        });
+    }
+
+    /** A player rolls for their own trainer or Pokémon. The GM screen's side
+        works out the dice from its own copy of the sheet and puts the roll in
+        the GM's dice history, from where it reaches everyone who can see
+        that fight like any other roll the GM makes. */
+    private onAct(id: string, body: Extract<Body, { k: 'act' }>): void {
+        const who = this.names.get(id);
+        const tids = this.controls.get(id);
+        if (!who || !tids || !this.moveHost) return;
+        if (!this.allow(id)) {
+            this.notify(who + ' is rolling faster than the table can follow.');
+            return;
+        }
+        this.moveHost.act(id, tids, body);
     }
 
     private onRequest(
@@ -694,6 +811,9 @@ export class TableSession {
                 this.greeted.delete(id);
                 this.combatSent.delete(id);
                 this.peerOf.delete(id);
+                this.controls.delete(id);
+                this.claimSeen.delete(id);
+                this.kitsSent.delete(id);
                 changed = true;
             }
         }
@@ -825,6 +945,44 @@ export class TableSession {
         void this.publish({ k: 'combat', to: id, fights: mine }, this.peerOf.get(id));
     }
 
+    /** The GM screen's side of players' own rolls. */
+    setMoveHost(host: MoveHost | null): void {
+        this.moveHost = host;
+        this.refreshKits();
+    }
+
+    /** The GM's board changed: bring every player's move list up to date.
+        Batched like the combat trackers, and only sent where it changed. */
+    refreshKits(): void {
+        if (!this.store.state.isHost) return;
+        if (this.kitTimer !== null) clearTimeout(this.kitTimer);
+        this.kitTimer = window.setTimeout(() => {
+            this.kitTimer = null;
+            for (const id of this.controls.keys()) this.sendKitsTo(id, false);
+        }, 200);
+    }
+
+    private sendKitsTo(id: string, force: boolean): void {
+        if (!this.moveHost) return;
+        const tids = this.controls.get(id) || [];
+        const kits = fitKits(tids.length ? this.moveHost.kits(id, tids) : []);
+        const json = JSON.stringify(kits);
+        if (!force && this.kitsSent.get(id) === json) return;
+        this.kitsSent.set(id, json);
+        void this.publish({ k: 'moves', to: id, kits }, this.peerOf.get(id));
+    }
+
+    /** Player: roll this for my own trainer or Pokémon. The GM's browser makes
+        the roll; it comes back in the GM's dice like any other. */
+    act(tok: string, roll: KitRoll, mi = -1, move = ''): void {
+        const s = this.store.state;
+        if (s.isHost) return;
+        if (!s.hostOnline) { this.notify('The GM is not connected, so that roll was not made.'); return; }
+        void this.publish({ k: 'act', tok, roll, mi, move }).then((sent) => {
+            if (!sent) this.notify('Not connected, so that roll was not made.');
+        });
+    }
+
     clearFeed(): void {
         if (!this.store.state.isHost) return;
         this.store.update((s) => { s.rolls = []; });
@@ -839,6 +997,9 @@ export class TableSession {
         this.buckets.delete(id);
         this.combatSent.delete(id);
         this.peerOf.delete(id);
+        this.controls.delete(id);
+        this.claimSeen.delete(id);
+        this.kitsSent.delete(id);
         void this.publish({ k: 'kick', id });
         void this.publishRoster();
     }
@@ -892,6 +1053,21 @@ function fitCombat(fights: WireFight[]): WireFight[] {
         if (r >= 0) { out[r] = { ...out[r], rolls: out[r].rolls.slice(0, -1) }; continue; }
         const last = out[out.length - 1];
         if (last.rows.length) last.rows = last.rows.slice(0, -1);
+        else out.pop();
+    }
+    return out;
+}
+
+/** Keeps a move list under the size every receiver accepts: the move
+    effects go first, then moves from the end, then whole subjects. */
+function fitKits(kits: WireKit[]): WireKit[] {
+    let out = kits.slice(0, LIMITS.MAX_KITS);
+    const budget = LIMITS.MAX_WIRE_CHARS - 2048;
+    if (JSON.stringify(out).length <= budget) return out;
+    out = out.map((k) => ({ ...k, moves: k.moves.map((m) => ({ ...m, effect: '' })) }));
+    while (out.length && JSON.stringify(out).length > budget) {
+        const last = out[out.length - 1];
+        if (last.moves.length) out[out.length - 1] = { ...last, moves: last.moves.slice(0, -1) };
         else out.pop();
     }
     return out;

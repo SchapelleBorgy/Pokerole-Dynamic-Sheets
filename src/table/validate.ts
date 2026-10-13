@@ -11,7 +11,10 @@
    to try. */
 
 import { LIMITS } from './protocol';
-import type { Body, Inner, WireCombatant, WireFight, WireGmRoll, WireMember, WireRoll } from './protocol';
+import { KIT_ROLLS } from './protocol';
+import type {
+    Body, Inner, KitRoll, WireClaim, WireCombatant, WireFight, WireGmRoll, WireKit, WireKitMove, WireMember, WireRoll,
+} from './protocol';
 import { AILMENTS } from '../gm/ailments';
 import { MAX_ACTIONS, ROUND_FLAGGED } from '../gm/combat';
 
@@ -245,6 +248,64 @@ function parseFight(raw: unknown): WireFight | null {
     return { id, name: cleanText(raw.name, LIMITS.MAX_COMBAT_NAME) || 'Combat', round, rows, rolls };
 }
 
+/** A trainer's stored token: the trainer, or a slot on its team. */
+const KIT_TOKEN_RE = /^(T:[A-Za-z0-9_-]{1,48}|M:[A-Za-z0-9_-]{1,48}:\d{1,2})$/;
+
+function parseClaim(raw: unknown): WireClaim | null {
+    if (!isRecord(raw) || !exactly(raw, ['tid', 'proof'])) return null;
+    const tid = idText(raw.tid);
+    if (!tid || typeof raw.proof !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.proof)) return null;
+    return { tid, proof: raw.proof };
+}
+
+function parseKitMove(raw: unknown): WireKitMove | null {
+    if (!isRecord(raw)) return null;
+    if (!exactly(raw, ['name', 'type', 'cat', 'acc', 'dmg', 'accText', 'dmgText', 'extra', 'effect'])) return null;
+    const name = cleanText(raw.name, LIMITS.MAX_KIT_TEXT);
+    const acc = int(raw.acc, 0, LIMITS.MAX_COUNT);
+    const dmg = int(raw.dmg, 0, LIMITS.MAX_COUNT);
+    if (!name || acc === null || dmg === null) return null;
+    return {
+        name, acc, dmg,
+        type: cleanText(raw.type, LIMITS.MAX_KIT_TEXT),
+        cat: cleanText(raw.cat, LIMITS.MAX_KIT_TEXT),
+        accText: cleanText(raw.accText, LIMITS.MAX_KIT_TEXT),
+        dmgText: cleanText(raw.dmgText, LIMITS.MAX_KIT_TEXT),
+        extra: cleanText(raw.extra, LIMITS.MAX_NOTE),
+        effect: cleanText(raw.effect, LIMITS.MAX_EFFECT),
+    };
+}
+
+function parseKit(raw: unknown): WireKit | null {
+    if (!isRecord(raw)) return null;
+    if (!exactly(raw, ['tok', 'name', 'rows', 'need', 'pain', 'init', 'eva', 'clashS', 'clashSp', 'moves'])) return null;
+    if (typeof raw.tok !== 'string' || !KIT_TOKEN_RE.test(raw.tok)) return null;
+    const name = cleanText(raw.name, LIMITS.MAX_COMBAT_NAME);
+    const need = intOrNull(raw.need, 1, LIMITS.MAX_COUNT);
+    const pain = int(raw.pain, 0, 9);
+    const init = int(raw.init, -99, 99);
+    const eva = int(raw.eva, 0, LIMITS.MAX_COUNT);
+    const clashS = int(raw.clashS, 0, LIMITS.MAX_COUNT);
+    const clashSp = int(raw.clashSp, 0, LIMITS.MAX_COUNT);
+    if (!name || need === undefined || pain === null || init === null
+        || eva === null || clashS === null || clashSp === null) return null;
+    if (!Array.isArray(raw.rows) || raw.rows.length > LIMITS.MAX_KIT_ROWS) return null;
+    const rows: string[] = [];
+    for (const r of raw.rows) {
+        const id = idText(r);
+        if (!id) return null;
+        rows.push(id);
+    }
+    if (!Array.isArray(raw.moves) || raw.moves.length > LIMITS.MAX_KIT_MOVES) return null;
+    const moves: WireKitMove[] = [];
+    for (const m of raw.moves) {
+        const parsed = parseKitMove(m);
+        if (!parsed) return null;
+        moves.push(parsed);
+    }
+    return { tok: raw.tok, name, rows, need, pain, init, eva, clashS, clashSp, moves };
+}
+
 export function parseBody(raw: unknown): Body | null {
     if (!isRecord(raw) || typeof raw.k !== 'string') return null;
 
@@ -302,6 +363,37 @@ export function parseBody(raw: unknown): Body | null {
             if (!exactly(raw, ['k', 'id'])) return null;
             const id = fingerprintText(raw.id);
             return id ? { k: 'kick', id } : null;
+        }
+        case 'claim': {
+            if (!exactly(raw, ['k', 'claims'])) return null;
+            if (!Array.isArray(raw.claims) || raw.claims.length > LIMITS.MAX_CLAIMS) return null;
+            const claims: WireClaim[] = [];
+            for (const c of raw.claims) {
+                const parsed = parseClaim(c);
+                if (!parsed) return null;
+                claims.push(parsed);
+            }
+            return { k: 'claim', claims };
+        }
+        case 'moves': {
+            if (!exactly(raw, ['k', 'to', 'kits'])) return null;
+            const to = fingerprintText(raw.to);
+            if (!to || !Array.isArray(raw.kits) || raw.kits.length > LIMITS.MAX_KITS) return null;
+            const kits: WireKit[] = [];
+            for (const k of raw.kits) {
+                const parsed = parseKit(k);
+                if (!parsed) return null;
+                kits.push(parsed);
+            }
+            return { k: 'moves', to, kits };
+        }
+        case 'act': {
+            if (!exactly(raw, ['k', 'tok', 'roll', 'mi', 'move'])) return null;
+            if (typeof raw.tok !== 'string' || !KIT_TOKEN_RE.test(raw.tok)) return null;
+            if (!KIT_ROLLS.includes(raw.roll as KitRoll)) return null;
+            const mi = int(raw.mi, -1, LIMITS.MAX_KIT_MOVES - 1);
+            if (mi === null || typeof raw.move !== 'string') return null;
+            return { k: 'act', tok: raw.tok, roll: raw.roll as KitRoll, mi, move: cleanText(raw.move, LIMITS.MAX_KIT_TEXT) };
         }
         case 'combat': {
             if (!exactly(raw, ['k', 'to', 'fights'])) return null;

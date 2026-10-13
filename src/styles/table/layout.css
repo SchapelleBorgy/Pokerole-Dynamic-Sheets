@@ -233,6 +233,59 @@
     color: var(--text-primary);
 }
 
+/* A player's own trainer and Pokémon: marked, and with the one button a
+   player has on the board, which opens their move list under the row. */
+.combat-entry { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.combat-row.mine { border-color: var(--accent-border); }
+
+.my-moves-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 7px;
+    border: 1px solid var(--accent-border);
+    background: var(--accent-faint);
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.my-moves-btn:hover,
+.my-moves-btn.on {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.my-moves {
+    border: 1px solid var(--accent-border);
+    border-radius: 10px;
+    background: var(--panel-strong);
+    padding: 0.5rem 0.6rem;
+    font-size: 0.8rem;
+}
+
+.my-moves button:disabled { opacity: 0.55; cursor: progress; }
+
+.my-last {
+    border-top: 1px solid var(--border-glow);
+    margin-top: 0.3rem;
+    padding-top: 0.3rem;
+}
+
+.my-last-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.my-last .roll-history-entry { border-bottom: 0; }
+
 /* Nothing on a player's row is a control. */
 .combat-row.read-only .pips,
 .combat-row.read-only .used-mark,

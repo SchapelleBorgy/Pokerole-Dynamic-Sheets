@@ -34,6 +34,12 @@ function pool(p: { cur: number; max: number } | null): [number, number] | null {
     return [whole(p.cur, -9999, 99999) ?? 0, whole(p.max, 0, 99999) ?? 0];
 }
 
+/** The id a combat row goes out under: its own, or its place in the fight. */
+export function rowIdOf(p: GmCombatant, index: number): string {
+    const pid = String((p as unknown as Record<string, unknown>).pid ?? '');
+    return ID_RE.test(pid) ? pid : 'row' + index;
+}
+
 function row(
     state: GmState, dexById: (id: string) => PokedexEntry | null,
     p: GmCombatant, round: number, index: number,
@@ -48,10 +54,9 @@ function row(
     const dexId = typeof rec.dexId === 'string' ? rec.dexId : null;
     const img = dexId ? dexById(dexId)?.Image ?? null : null;
     const dealt = rec.dealt as Record<string, number> | undefined;
-    const pid = String(rec.pid ?? '');
 
     return {
-        id: ID_RE.test(pid) ? pid : 'row' + index,
+        id: rowIdOf(p, index),
         name: String(rec.label || '').trim().slice(0, LIMITS.MAX_COMBAT_NAME) || '?',
         kind: rec.kind === 'trainer' ? 't' : rec.kind === 'custom' ? 'c' : 'p',
         img: img && IMG_RE.test(img) ? img : null,

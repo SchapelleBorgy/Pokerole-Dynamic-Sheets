@@ -151,6 +151,13 @@ function roomKeys(code: string): Promise<RoomKeys> {
     return job;
 }
 
+/** The secret half of a live room's keys, for proving elsewhere that this
+    browser holds the room's code without ever sending the code. The rolling
+    table uses it to let a player roll for their own trainer's Pokémon. */
+export async function liveRoomPass(code: string): Promise<string> {
+    return (await roomKeys(code)).pass;
+}
+
 async function deriveRoomKeys(code: string): Promise<RoomKeys> {
     const saved = readJSON<Record<string, RoomKeys>>(KEYS_KEY, {})[code];
     if (saved && typeof saved.room === 'string' && typeof saved.pass === 'string') return saved;

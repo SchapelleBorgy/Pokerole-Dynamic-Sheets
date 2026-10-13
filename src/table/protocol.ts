@@ -96,6 +96,54 @@ export interface WireFight {
     rolls: WireGmRoll[];
 }
 
+/** A player's proof that they hold the live-sheet code for a trainer: an
+    HMAC, keyed by the live room's secret, over this lobby, this player and
+    the trainer. Never the code itself. See claims.ts. */
+export interface WireClaim {
+    tid: string;
+    proof: string;
+}
+
+/** One move on a player's own Pokémon, as the GM screen's move panel shows it.
+    The numbers are for display: when the player rolls, the GM's browser
+    works the pool out again from its own copy of the sheet. */
+export interface WireKitMove {
+    name: string;
+    type: string;
+    cat: string;
+    /** Dice in the accuracy and damage pools; 0 when there is nothing to roll. */
+    acc: number;
+    dmg: number;
+    /** The pools as the move panel words them, e.g. "Dex 3 + Channel 1". */
+    accText: string;
+    dmgText: string;
+    /** What STAB or a held item adds, already in `dmg`. */
+    extra: string;
+    effect: string;
+}
+
+/** Something a player may roll for: their trainer, or one of that trainer's
+    Pokémon, standing in a fight they can see. */
+export interface WireKit {
+    /** Stored token: `T:<trainer>` or `M:<trainer>:<slot>`. */
+    tok: string;
+    name: string;
+    /** The combat rows (WireCombatant ids) that are this subject. */
+    rows: string[];
+    /** Successes this action needs, from the tracker's pips; null outside a fight. */
+    need: number | null;
+    pain: number;
+    /** Initiative's flat bonus, and the Evasion and Clash pools. */
+    init: number;
+    eva: number;
+    clashS: number;
+    clashSp: number;
+    moves: WireKitMove[];
+}
+
+export type KitRoll = 'acc' | 'dmg' | 'init' | 'eva' | 'clash-s' | 'clash-sp';
+export const KIT_ROLLS: readonly KitRoll[] = ['acc', 'dmg', 'init', 'eva', 'clash-s', 'clash-sp'];
+
 export type Body =
     /** Any member, on connect and every heartbeat. Doubles as presence. */
     | { k: 'hello'; name: string }
@@ -114,7 +162,14 @@ export type Body =
     /** Host only, to one player: the combat trackers that player may see,
         whole, every time they change. Each player gets their own, because
         the GM picks who sees which fight. */
-    | { k: 'combat'; to: string; fights: WireFight[] };
+    | { k: 'combat'; to: string; fights: WireFight[] }
+    /** Player to host: the trainers this player holds the live sheet for. */
+    | { k: 'claim'; claims: WireClaim[] }
+    /** Host only, to one player: what that player may roll for. */
+    | { k: 'moves'; to: string; kits: WireKit[] }
+    /** Player to host: roll this for my Pokémon. `mi` and `move` name the
+        move for accuracy and damage, and are -1 and '' otherwise. */
+    | { k: 'act'; tok: string; roll: KitRoll; mi: number; move: string };
 
 export interface Inner {
     v: number;
@@ -156,6 +211,14 @@ export const LIMITS = {
     MAX_COMBAT_NAME: 40,
     /** Of the GM screen's 30-roll history, per fight. */
     MAX_FIGHT_ROLLS: 12,
+
+    /** A player's own trainer and Pokémon. */
+    MAX_CLAIMS: 8,
+    MAX_KITS: 12,
+    MAX_KIT_ROWS: 8,
+    MAX_KIT_MOVES: 24,
+    MAX_KIT_TEXT: 40,
+    MAX_EFFECT: 240,
 
     /** Kept below the relay's own 32 KB ceiling. */
     MAX_WIRE_CHARS: 24 * 1024,

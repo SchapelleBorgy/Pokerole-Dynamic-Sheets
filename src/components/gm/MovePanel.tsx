@@ -21,7 +21,7 @@ import type { CardSheet } from '../../card/types';
    it used to follow the pointer, which meant it appeared over whatever was being
    read on the way past. One is open at a time. */
 
-const CAT_COLORS: Record<string, string> = {
+export const CAT_COLORS: Record<string, string> = {
     Physical: '#f97316', Special: '#3b82f6', Support: '#10b981',
 };
 

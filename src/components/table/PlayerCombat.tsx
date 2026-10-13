@@ -3,18 +3,25 @@
    the GM screen's dice panel, holding only the GM's rolls for someone in
    those fights.
 
+   The one exception is the player's own: a row that is their trainer or one
+   of its Pokémon (they hold that trainer's live sheet) has a Moves button,
+   which opens the same move list the GM's move panel shows. Picking a move
+   asks the GM's browser to roll it, and the result lands in the GM's dice
+   like any other roll.
+
    The markup and class names are the combat panel's own, so the two read the
    same and gm/combat.css styles both. What is missing is every control: the
    initiative is a number rather than a field, the pips and the clash and
    evasion marks are marks rather than buttons, and the status chips do not
    cycle. The board is the GM's to change. */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { FallbackImage } from '../common/FallbackImage';
 import { SideScroll } from '../common/SideScroll';
 import { PoolBar } from '../gm/RosterBits';
 import { StatusChips } from '../gm/StatusChips';
 import { RollHistoryEntry, RollOutput } from '../gm/DicePanel';
+import { CAT_COLORS } from '../gm/MovePanel';
 import { useTable } from '../../table/TableContext';
 import { ailmentByKey, defaultStatus } from '../../gm/ailments';
 import type { GmStatus } from '../../gm/ailments';
@@ -23,7 +30,19 @@ import { CRIT_MARGIN } from '../../gm/constants';
 import { HISTORY_LIMIT, scoreRoll } from '../../gm/dice';
 import type { RollEntry } from '../../gm/dice';
 import { tileSpriteChain } from '../../lib/sprites';
-import type { WireCombatant, WireFight } from '../../table/protocol';
+import { typeColors } from '../../lib/themeTables';
+import type { KitRoll, WireCombatant, WireFight, WireGmRoll, WireKit } from '../../table/protocol';
+
+/** One of the GM's rolls, scored again from its faces by the GM screen's own
+    code, so the total, successes and verdict are the ones the GM saw. */
+function scored(w: WireGmRoll): RollEntry {
+    const e = scoreRoll(w.vals, w.sides, {
+        who: w.who || undefined, what: w.what || undefined,
+        bonus: w.bonus, pain: w.pain || undefined, need: w.need,
+    }, CRIT_MARGIN);
+    e.t = w.t;
+    return e;
+}
 
 export function PlayerCombat() {
     const { state } = useTable();
@@ -66,12 +85,7 @@ function GmDice({ fights }: { fights: WireFight[] }) {
                 const key = w.t + ':' + w.sides + ':' + w.vals.join(',');
                 if (seen.has(key)) continue;
                 seen.add(key);
-                const e = scoreRoll(w.vals, w.sides, {
-                    who: w.who || undefined, what: w.what || undefined,
-                    bonus: w.bonus, pain: w.pain || undefined, need: w.need,
-                }, CRIT_MARGIN);
-                e.t = w.t;
-                out.push(e);
+                out.push(scored(w));
             }
         }
         return out.sort((a, b) => b.t - a.t).slice(0, HISTORY_LIMIT);
@@ -105,6 +119,10 @@ function GmDice({ fights }: { fights: WireFight[] }) {
 }
 
 function FightPanel({ fight }: { fight: WireFight }) {
+    const { state } = useTable();
+    const [open, setOpen] = useState<string | null>(null);
+    const kitOf = (rowId: string) => (state.kits || []).find((k) => k.rows.includes(rowId)) || null;
+
     return (
         <section className="panel" data-panel-kind="combat">
             <div className="panel-head">
@@ -118,7 +136,21 @@ function FightPanel({ fight }: { fight: WireFight }) {
                 <div className="combat-list">
                     {!fight.rows.length
                         ? <div className="empty-note">No combatants yet.</div>
-                        : fight.rows.map((r) => <FightRow key={r.id} r={r} />)}
+                        : fight.rows.map((r) => {
+                            const kit = kitOf(r.id);
+                            const shown = !!kit && open === r.id;
+                            return (
+                                <div className="combat-entry" key={r.id}>
+                                    <FightRow
+                                        r={r}
+                                        mine={!!kit}
+                                        open={shown}
+                                        onMoves={kit ? () => setOpen(shown ? null : r.id) : undefined}
+                                    />
+                                    {shown && kit && <MyMoves kit={kit} fight={fight} />}
+                                </div>
+                            );
+                        })}
                 </div>
             </div>
         </section>
@@ -147,11 +179,16 @@ function statusOf(keys: string[]): GmStatus {
 
 const noCycle = () => { /* read-only */ };
 
-function FightRow({ r }: { r: WireCombatant }) {
+function FightRow({ r, mine, open, onMoves }: {
+    r: WireCombatant;
+    mine: boolean;
+    open: boolean;
+    onMoves?: () => void;
+}) {
     const kindIcon = r.kind === 't' ? 'fa-user' : r.kind === 'c' ? 'fa-masks-theater' : 'fa-paw';
 
     return (
-        <div className={'combat-row read-only' + (r.acted >= MAX_ACTIONS ? ' spent' : '')}>
+        <div className={'combat-row read-only' + (r.acted >= MAX_ACTIONS ? ' spent' : '') + (mine ? ' mine' : '')}>
             {r.img
                 ? (
                     <FallbackImage
@@ -166,6 +203,18 @@ function FightRow({ r }: { r: WireCombatant }) {
             <div className="c-main">
                 <div className="c-head">
                     <div className="c-name" title={r.name}>{r.name}</div>
+                    {onMoves && (
+                        <button
+                            type="button"
+                            className={'my-moves-btn' + (open ? ' on' : '')}
+                            aria-expanded={open}
+                            title={r.kind === 't' ? 'Your rolls: Initiative, Evasion and Clash' : 'Your moves: pick one to roll'}
+                            onClick={onMoves}
+                        >
+                            <i className={'fa-solid ' + (r.kind === 't' ? 'fa-dice-d6' : 'fa-list-ul')}></i>
+                            {r.kind === 't' ? 'Rolls' : 'Moves'}
+                        </button>
+                    )}
                     <span className="c-init-wrap">
                         <span className="init-label">Init</span>
                         <span className="c-init c-init-ro">{r.init ?? '–'}</span>
@@ -213,6 +262,114 @@ function FightRow({ r }: { r: WireCombatant }) {
                             </span>
                         );
                     })}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** A player's own trainer or Pokémon: the GM's move panel, minus nothing but
+    the GM. Every button asks the GM's browser to make that roll, which works
+    the dice out again from its own copy of the sheet. */
+function MyMoves({ kit, fight }: { kit: WireKit; fight: WireFight }) {
+    const { session } = useTable();
+    const [busy, setBusy] = useState(false);
+    const trainer = kit.tok.startsWith('T:');
+
+    const go = (roll: KitRoll, mi = -1, move = '') => {
+        if (busy) return;
+        setBusy(true);
+        session.act(kit.tok, roll, mi, move);
+        /* One roll per click: long enough to swallow a double-click, short
+           enough not to be noticed. */
+        window.setTimeout(() => setBusy(false), 900);
+    };
+
+    const chip = (key: KitRoll, label: string, dice: number, tip: string) => (dice > 0
+        ? (
+            <button key={key} type="button" className="tip-roll" title={tip} disabled={busy} onClick={() => go(key)}>
+                {label} <strong>{dice}</strong>
+            </button>
+        )
+        : <span key={key} title={tip}>{label} <strong>{dice}</strong></span>);
+
+    /* The latest of the GM's rolls for this subject in this fight, so the
+       result shows up where the button was pressed. */
+    const latest = useMemo(() => {
+        const w = fight.rolls.find((x) => x.who === kit.name);
+        return w ? scored(w) : null;
+    }, [fight.rolls, kit.name]);
+
+    return (
+        <div className="my-moves">
+            <div className="tip-quick">
+                <button type="button" className="tip-roll" title="Dexterity + Alert" disabled={busy} onClick={() => go('init')}>
+                    INIT <strong>1d6{kit.init < 0 ? '−' + Math.abs(kit.init) : '+' + kit.init}</strong>
+                </button>
+                {chip('eva', 'EVA', kit.eva, 'Dexterity + Evasion')}
+                {chip('clash-s', 'CLASH-S', kit.clashS, 'Strength + Clash')}
+                {chip('clash-sp', 'CLASH-SP', kit.clashSp, 'Special + Clash')}
+                {kit.pain > 0 && (
+                    <span className="tip-pain" title="Half HP or less: −1 success on every roll, −2 at 1 HP. Already taken off rolls made here.">
+                        PAIN −{kit.pain}
+                    </span>
+                )}
+            </div>
+            {kit.need != null && (
+                <div className="tip-action">
+                    Action <strong>{kit.need}</strong> · needs <strong>{kit.need}</strong>{' '}
+                    {kit.need === 1 ? 'success' : 'successes'}
+                </div>
+            )}
+            {!kit.moves.length ? (
+                <div className="tip-empty">
+                    {trainer
+                        ? 'A trainer has no move list. Your Pokémon carry theirs.'
+                        : 'No pinned moves. Pin them on this Pokémon’s card and they show up here.'}
+                </div>
+            ) : kit.moves.map((m, mi) => {
+                const tc = typeColors[m.type] || '#e5e7eb';
+                const cc = CAT_COLORS[m.cat] || 'var(--text-secondary)';
+                return (
+                    <div className="tip-move" key={m.name + mi}>
+                        <div className="tip-move-head">
+                            <span className="tip-move-name">{m.name}</span>
+                            {m.type && (
+                                <span className="tip-badge" style={{ color: tc, borderColor: tc + '66', background: tc + '1a' }}>
+                                    {m.type}
+                                </span>
+                            )}
+                            {m.cat && (
+                                <span className="tip-badge" style={{ color: cc, borderColor: cc + '66', background: cc + '1a' }}>
+                                    {m.cat}
+                                </span>
+                            )}
+                        </div>
+                        <div className="tip-pools">
+                            {m.acc > 0 ? (
+                                <button type="button" className="tip-pool acc" disabled={busy}
+                                    title={'Roll ' + m.acc + ' dice for accuracy'}
+                                    onClick={() => go('acc', mi, m.name)}>
+                                    ACC <strong>{m.accText}</strong>
+                                </button>
+                            ) : <span className="tip-pool acc">ACC <strong>{m.accText}</strong></span>}
+                            {m.dmg > 0 ? (
+                                <button type="button" className="tip-pool dmg" disabled={busy}
+                                    title={'Roll ' + m.dmg + ' dice for damage (2 more straight after a critical hit with this move)'}
+                                    onClick={() => go('dmg', mi, m.name)}>
+                                    DMG <strong>{m.dmgText}</strong>
+                                </button>
+                            ) : <span className="tip-pool dmg">DMG <strong>{m.dmgText}</strong></span>}
+                            {m.extra && <span className="tip-bonus">{m.extra}</span>}
+                        </div>
+                        {m.effect && <div className="tip-effect">{m.effect}</div>}
+                    </div>
+                );
+            })}
+            {latest && (
+                <div className="my-last">
+                    <span className="my-last-label">Last roll</span>
+                    <RollHistoryEntry entry={latest} sorted={false} withCtx />
                 </div>
             )}
         </div>

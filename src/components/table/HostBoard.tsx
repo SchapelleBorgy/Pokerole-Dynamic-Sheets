@@ -12,6 +12,9 @@ import { GmStoreProvider, useGm, useGmStore } from '../../gm/GmContext';
 import { GmStore } from '../../gm/store';
 import { GmApp } from '../gm/GmApp';
 import { startLive } from '../../live/engine';
+import { CRIT_MARGIN } from '../../gm/constants';
+import { HISTORY_LIMIT, roll } from '../../gm/dice';
+import { kitRoll, kitsFor } from '../../table/moveKit';
 import { workingSetAdapter } from '../../live/adapters';
 import { useTable } from '../../table/TableContext';
 import {
@@ -80,10 +83,15 @@ function useFightAccess(): FightAccess {
     return useSyncExternalStore(subscribeFightAccess, fightAccess, fightAccess);
 }
 
-/** Sends the combat trackers to the players on every board change. Renders
-    nothing. Subscribes to the store directly rather than through a render, so
-    an HP change made on a trainer sheet (which redraws the board without
-    changing the board's own state) still goes out. */
+/** Sends the combat trackers to the players on every board change, and each
+    player the moves of their own trainer's Pokémon. Renders nothing.
+    Subscribes to the store directly rather than through a render, so an HP
+    change made on a trainer sheet (which redraws the board without changing
+    the board's own state) still goes out.
+
+    Also where a player's own roll is made: the session hands over the request
+    once it has checked who sent it, and the dice go into the GM's history
+    exactly as if the GM had clicked the move on their own move panel. */
 function CombatBroadcast() {
     const store = useGmStore();
     const { data } = useAppData();
@@ -94,9 +102,29 @@ function CombatBroadcast() {
         const byId = new Map(data.pokemon.map((p) => [p._id, p] as const));
         const dexById = (id: string): PokedexEntry | null => byId.get(id) || null;
         const ids = accessIds(access);
-        const push = () => session.shareCombat(combatSnapshot(store.state, dexById), ids);
+        /* The fights a player can see: the same rule the trackers go out by */
+        const seenBy = (member: string) => new Set(store.state.combats
+            .filter((c) => !ids[c.gid] || ids[c.gid].includes(member))
+            .map((c) => c.gid));
+
+        session.setMoveHost({
+            kits: (member, tids) => kitsFor(store.state, dexById, data, tids, seenBy(member)),
+            act: (member, tids, act) => {
+                const r = kitRoll(store.state, dexById, data, tids, seenBy(member), act);
+                if (!r) return;
+                store.update((s) => {
+                    const entry = roll(r.count, 6, r.meta, CRIT_MARGIN);
+                    s.dice = { ...s.dice, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
+                });
+            },
+        });
+        const push = () => {
+            session.shareCombat(combatSnapshot(store.state, dexById), ids);
+            session.refreshKits();
+        };
         push();
-        return store.subscribe(push);
+        const off = store.subscribe(push);
+        return () => { off(); session.setMoveHost(null); };
     }, [store, data, session, access]);
 
     return null;
