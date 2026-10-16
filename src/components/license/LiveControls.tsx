@@ -3,7 +3,7 @@ import { Modal, ModalClose, ModalTitle } from '../common/Modal';
 import { useToast } from '../common/Toast';
 import { useSheetStore } from '../../state/SheetContext';
 import { useSession } from '../../state/SessionContext';
-import { getLive, liveEntries, normalizeCode, shareLink } from '../../live/engine';
+import { getLive, liveEntries, normalizeCode, relayHealth, shareLink } from '../../live/engine';
 import type { LiveEngine } from '../../live/engine';
 import { licenseHooks } from '../../live/adapters';
 
@@ -99,12 +99,21 @@ function LiveWindow() {
     const [code, setCode] = useState('');
     const input = useRef<HTMLInputElement>(null);
     const close = useCallback(() => setWindowOpen(false), []);
+    /* The relays' lines open and drop without telling the engine, so while
+       the window is up it looks again every second. */
+    const [, tick] = useState(0);
 
     useEffect(() => {
         if (!open) return;
         const id = window.setTimeout(() => { if (!liveEntries().some((e) => e.tid === sheet.id)) input.current?.focus(); }, 30);
         return () => clearTimeout(id);
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        const id = window.setInterval(() => tick((n) => n + 1), 1000);
+        return () => clearInterval(id);
     }, [open]);
 
     if (!live) return null;
@@ -129,11 +138,58 @@ function LiveWindow() {
             : 'Waiting for someone to join…';
     }
 
+    /* While nothing has connected, say how far this device got: whether it
+       reached the relays that introduce the two devices at all. That is the
+       difference between a network or blocker in the way on this device, and
+       the other device not being there. */
+    const relays = relayHealth();
+    let reach = '';
+    if (list.length && !list.some((e) => live.peersIn(e.code) > 0) && relays) {
+        reach = relays.up === 0
+            ? 'This device can’t reach any of the servers that introduce the two devices. Try another Wi‑Fi or mobile data, and turn off any VPN, ad blocker or iCloud Private Relay for this site.'
+            : 'Reached ' + relays.up + ' of ' + relays.total + ' servers. Looking for the other device: its page needs to be open, with the same code live.';
+    }
+
+    /* A player arriving with a blank sheet came to join, not to share it,
+       and while their join is still going there is nothing to share yet */
+    const joinFirst = !cur && !sheet.name;
+    const joining = joinFirst && list.some((e) => e.role === 'guest' && !e.tid);
+
+    const joinBlock = (
+        <>
+            <p className="modal-text" style={{ marginBottom: 6 }}>Got a code from someone else?</p>
+            <div className="live-row">
+                <input
+                    ref={input}
+                    className="live-input"
+                    id="live-join-input"
+                    placeholder="ABCD-2345"
+                    maxLength={9}
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    enterKeyHint="go"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') join(); }}
+                />
+                <button className="form-btn save" style={{ flex: '0 0 auto' }} data-act="join" onClick={join}>Join</button>
+            </div>
+        </>
+    );
+
     return (
         <Modal open={open} onClose={close} id="live-modal" boxStyle={{ maxWidth: 400 }}>
             <ModalClose onClick={close} />
             <ModalTitle icon="fa-tower-broadcast" centered={false}>Live sheet</ModalTitle>
-            {cur ? (
+            {joinFirst && (
+                <>
+                    {joinBlock}
+                    {!joining && <hr className="live-sep" />}
+                </>
+            )}
+            {joining ? null : cur ? (
                 <>
                     <p className="modal-text">
                         <strong>{name}</strong> is live. Send your player this code or link:
@@ -181,22 +237,13 @@ function LiveWindow() {
                     </ul>
                 </>
             )}
-            <hr className="live-sep" />
-            <p className="modal-text" style={{ marginBottom: 6 }}>Got a code from someone else?</p>
-            <div className="live-row">
-                <input
-                    ref={input}
-                    className="live-input"
-                    id="live-join-input"
-                    placeholder="ABCD-2345"
-                    maxLength={9}
-                    autoComplete="off"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') join(); }}
-                />
-                <button className="form-btn save" style={{ flex: '0 0 auto' }} data-act="join" onClick={join}>Join</button>
-            </div>
+            {reach && <p className="live-sub live-reach">{reach}</p>}
+            {!joinFirst && (
+                <>
+                    <hr className="live-sep" />
+                    {joinBlock}
+                </>
+            )}
         </Modal>
     );
 }

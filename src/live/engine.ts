@@ -1,4 +1,4 @@
-import { joinRoom as nostrJoinRoom } from '@trystero-p2p/nostr';
+import { getRelaySockets as nostrRelaySockets, joinRoom as nostrJoinRoom } from '@trystero-p2p/nostr';
 import type { DataPayload, JoinRoom, NostrRoomConfig, Room } from '@trystero-p2p/nostr';
 import { WORKING_KEY } from '../state/constants';
 import { applyOps, cleanJson, diff, parseOps } from './patch';
@@ -29,6 +29,13 @@ const KEYS_KEY = 'pokerole_live_keys';   // { code: the room name and key worked
 const APP_ID = 'pokerole-dynamic-sheets-live-v2';
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const DIFF_DELAY_MS = 120;
+/* How many public relays to look for the other device on. Trystero's default
+   is five, picked from its list in an order fixed by the app id, so every
+   device on this app agrees on them; asking for more keeps those same five
+   first and adds others behind them. A relay that is down, or that a network
+   or blocker won't let a device reach, then no longer leaves the two devices
+   with nowhere in common. */
+const RELAY_REDUNDANCY = 10;
 
 export type TrainerData = Record<string, unknown>;
 
@@ -178,9 +185,30 @@ async function deriveRoomKeys(code: string): Promise<RoomKeys> {
 }
 
 /* The transport is swappable so the test harness can use a local relay. */
+interface Transport {
+    joinRoom: JoinRoom<NostrRoomConfig>;
+    getRelaySockets?: () => Record<string, WebSocket>;
+}
+function testTransport(): Transport | undefined {
+    return (window as unknown as { PokeroleLiveTransport?: Transport }).PokeroleLiveTransport;
+}
 function transport(): JoinRoom<NostrRoomConfig> {
-    const w = window as unknown as { PokeroleLiveTransport?: { joinRoom: JoinRoom<NostrRoomConfig> } };
-    return w.PokeroleLiveTransport?.joinRoom || nostrJoinRoom;
+    return testTransport()?.joinRoom || nostrJoinRoom;
+}
+
+/** How many of the relays this page uses to find other devices it has an
+    open line to, or null before it has tried any. With none, a device can
+    wait forever without ever hearing of the other one. */
+export function relayHealth(): { up: number; total: number } | null {
+    try {
+        const t = testTransport();
+        const get = (t ? t.getRelaySockets : nostrRelaySockets) as (() => Record<string, WebSocket>) | undefined;
+        const all = Object.values((get && get()) || {});
+        if (!all.length) return null;
+        return { up: all.filter((s) => s && s.readyState === 1).length, total: all.length };
+    } catch {
+        return null;
+    }
 }
 
 export class LiveEngine {
@@ -319,6 +347,7 @@ export class LiveEngine {
         const cfg = {
             appId: APP_ID,
             password: keys.pass,
+            relayConfig: { redundancy: RELAY_REDUNDANCY },
             ...((window as unknown as { PokeroleLiveConfig?: object }).PokeroleLiveConfig || {}),
         };
         const room = transport()(cfg, 'pokerole-' + keys.room, {
