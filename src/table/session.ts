@@ -27,12 +27,20 @@ import type { Bytes } from './encoding';
 import { createHostIdentity, loadHostIdentity, memberIdentity } from './identity';
 import type { Identity } from './identity';
 import { HEARTBEAT_MS, LIMITS, PRESENCE_TIMEOUT_MS, PROTOCOL_VERSION, randomId } from './protocol';
-import type { Body, Inner, KitRoll, WireFight, WireKit, WireMember, WireRoll } from './protocol';
+import type { Body, Inner, KitRoll, RollExtras, WireFight, WireKit, WireMember, WireRoll } from './protocol';
+import type { CharKey } from './slim';
 import { checkClaims, makeClaims } from './claims';
 import { peerToPeer, roomUrl } from './relay';
 import { fabricateD6, fabricateTotal } from './scripted';
 import { RelayTransport } from './transport';
 import { PeerTransport } from './peerTransport';
+import { BlobChannel } from './blobs';
+import { ServerClock } from './clock';
+import { hostUploadKey } from './identity';
+import type { TableApi } from './link';
+import { MapShare } from './mapShare';
+import { CombatShare } from './combatShare';
+import { MusicController } from './music/music';
 import type { TableTransport, TransportStatus } from './transport';
 import { cleanText, parseInner, parseSigned, safeParse } from './validate';
 
@@ -204,6 +212,20 @@ export interface MoveHost {
 /** The live-sheet list, which says which trainers this browser plays. */
 const LIVE_LIST_KEY = 'pokerole_live';
 
+/* What this browser itself may send. The relay closes a socket that sends
+   more than 40 frames in 10 seconds — for good, since reconnecting into the
+   same flood would only repeat it — and the clock pings come out of the same
+   allowance. So messages leave through one queue, at most 12 in a burst and
+   two a second after that: the most any 10 seconds can then hold is 12 + 20,
+   plus the clock's pings (at most 4 while it settles) and the keepalive, which
+   stays under 40 with room to spare. The queue also keeps them in sequence
+   order: signing is asynchronous, and two messages overtaking each other on
+   the way out would have the later one rejected as a replay. */
+const SEND_BURST = 12;
+/** The relay's own ceiling on a frame (worker/src/index.ts), less a margin. */
+const RELAY_FRAME_CHARS = 32 * 1024 - 512;
+const SEND_PER_SECOND = 2;
+
 export class TableSession {
     readonly store = new TableStore();
 
@@ -211,8 +233,12 @@ export class TableSession {
     private room: RoomSecrets | null = null;
     private identity: Identity | null = null;
 
-    /* Fresh every page load, so a reloaded tab starting its counter at zero is
-       not mistaken for a replay of the old one. */
+    /* Fresh with every join (begin), alongside the counter going back to zero,
+       so a session starting again is not mistaken for a replay of the old one.
+       It used to be fresh only per page load: a player removed by the GM, or
+       who left, and joined again without reloading kept the old sid with a
+       counter back at 1, and the GM dropped everything they sent as replays —
+       they saw the table but could not roll. */
     private sid = randomId(6);
     private seq = 0;
     private seen = new Map<string, number>();
@@ -242,13 +268,15 @@ export class TableSession {
        the replay check would then drop the large one as old. */
     private outbox: Promise<unknown> = Promise.resolve();
     private inbox: Promise<unknown> = Promise.resolve();
+    private sendTokens = SEND_BURST;
+    private sendTokensAt = 0;
 
     /* Host only: every combat tracker, already in wire shape; who may see
        which (by fight id: a list of member ids, or no entry for everyone);
        what each player was last sent; and the timer that batches a burst of
        edits into one round of sends. On a player, combatJson is the last
        board received, so an unchanged resend does not redraw. */
-    private combat: WireFight[] | null = null;
+    private fights: WireFight[] | null = null;
     private combatAccess: Readonly<Record<string, readonly string[]>> = {};
     private combatJson = '';
     private combatSent = new Map<string, string>();
@@ -272,6 +300,24 @@ export class TableSession {
     private claimsJson = '[]';
     private kitsJson = '';
     private onLiveList: ((e: StorageEvent) => void) | null = null;
+
+    /* The shared map and the music. They reach the table only through this. */
+    private files: BlobChannel | null = null;
+    readonly clock = new ServerClock((frame) => this.transport?.send(frame) ?? false);
+    private api: TableApi = {
+        clock: this.clock,
+        publish: (body) => this.publish(body),
+        notify: (text) => this.notify(text),
+        files: () => this.files,
+        isHost: () => this.store.state.isHost,
+        lobbyId: () => this.store.state.lobbyId,
+        members: () => this.store.state.members,
+        myId: () => this.store.state.myId,
+        changed: () => this.store.update(() => { /* a feature's view moved */ }),
+    };
+    readonly map = new MapShare(this.api);
+    readonly music = new MusicController(this.api);
+    readonly combat = new CombatShare(this.api);
 
     /* ------------------------------------------------------------- joining */
 
@@ -335,6 +381,13 @@ export class TableSession {
 
         this.room = await deriveRoom(lobbyId, password);
         this.identity = identity;
+        /* The shared map and the music keep their files on the relay and
+           their time by its clock. Browsers connected directly have neither,
+           so at a direct table both stay off (see relay.ts). */
+        this.files = peerToPeer()
+            ? null
+            : new BlobChannel(this.room.key, this.room.addr, isHost ? await hostUploadKey(lobbyId) : null);
+        this.sid = randomId(6);
         this.seq = 0;
         this.seen.clear();
         this.queue = [];
@@ -345,7 +398,7 @@ export class TableSession {
         this.greeted.clear();
         this.handledRids.clear();
         this.buckets.clear();
-        this.combat = null;
+        this.fights = null;
         this.combatAccess = {};
         this.combatJson = '';
         this.combatSent.clear();
@@ -390,14 +443,29 @@ export class TableSession {
                 this.inbox = this.inbox.then(() => this.receive(text, from)).catch(() => { /* dropped */ });
             },
             onStatus: (status: TransportStatus, detail: string) => this.onStatus(status, detail),
+            onClock: (text: string) => this.clock.onFrame(text),
         };
         /* No relay deployed: browsers meet each other directly instead */
         this.transport = peerToPeer()
             ? new PeerTransport(this.room.addr, handlers)
             : new RelayTransport(roomUrl(this.room.addr), handlers);
         this.transport.start();
+        this.combat.begin(isHost, lobbyId);
 
         this.heartbeat = window.setInterval(() => this.tick(), HEARTBEAT_MS);
+
+        /* The GM takes the room's file store before anything is uploaded to it;
+           both features start once that is settled either way. */
+        const files = this.files;
+        if (files) void (async () => {
+            if (isHost && !await files.claim()) {
+                this.notify('The relay\u2019s file space could not be reached; music and maps will retry.');
+            }
+            if (this.files !== files) return;
+            this.map.onMissing = (id) => this.music.reportMissing(id);
+            await this.map.begin(isHost, lobbyId);
+            await this.music.begin(isHost, lobbyId);
+        })();
     }
 
     private teardown(): void {
@@ -417,10 +485,15 @@ export class TableSession {
             window.removeEventListener('storage', this.onLiveList);
             this.onLiveList = null;
         }
+        this.map.end();
+        this.music.end();
+        this.combat.end();
+        this.clock.stop();
         this.transport?.stop();
         this.transport = null;
         this.room = null;
         this.identity = null;
+        this.files = null;
     }
 
     private fail(message: string): void {
@@ -447,7 +520,21 @@ export class TableSession {
         return run;
     }
 
+    private async takeSendToken(): Promise<void> {
+        for (;;) {
+            const now = performance.now();
+            this.sendTokens = Math.min(SEND_BURST, this.sendTokens + (now - this.sendTokensAt) / 1000 * SEND_PER_SECOND);
+            this.sendTokensAt = now;
+            if (this.sendTokens >= 1) { this.sendTokens -= 1; return; }
+            await new Promise((r) => setTimeout(r, Math.ceil((1 - this.sendTokens) / SEND_PER_SECOND * 1000)));
+        }
+    }
+
     private async publishNow(body: Body, to?: string): Promise<boolean> {
+        if (!this.room || !this.identity || !this.transport?.connected) return false;
+        /* The relay's allowance. Browsers connected directly have no relay
+           to close on them, so they send as fast as they are asked to. */
+        if (!(this.transport instanceof PeerTransport)) await this.takeSendToken();
         if (!this.room || !this.identity) return false;
 
         const inner: Inner = {
@@ -471,6 +558,14 @@ export class TableSession {
         }
         const g = await sign(this.identity.pair, utf8(p));
         const wire = await seal(this.room.key, this.room.addr, JSON.stringify({ p, g }));
+        /* The relay measures the SEALED frame, and closes the socket for good
+           past 32 KB (1009, which the transport does not reconnect from). JSON
+           escaped into the envelope, encrypted and base64'd, a dense `p` well
+           under its own limit can still cross it. */
+        if (wire.length > RELAY_FRAME_CHARS) {
+            this.notify('That message is too large to send.');
+            return false;
+        }
 
         return this.transport?.send(wire, to) ?? false;
     }
@@ -483,9 +578,17 @@ export class TableSession {
         });
 
         if (status === 'online') {
+            if (this.files) this.clock.start();
             /* Announce first so the host can put us back in the roster, then
                replay anything that piled up while the socket was down. */
-            void this.announce().then(() => this.flushQueue());
+            void this.announce().then(() => {
+                this.flushQueue();
+                if (this.files) this.music.hello();
+            });
+            /* A relay that idled out forgot the GM's claim; take it back. */
+            if (this.store.state.isHost) void this.files?.claim();
+        } else {
+            this.clock.stop();
         }
     }
 
@@ -529,6 +632,10 @@ export class TableSession {
         if (this.store.state.isHost) {
             this.prunePresence();
             void this.publishRoster();
+            /* Anyone whose socket dropped for a moment missed what changed. */
+            this.map.greet();
+            this.music.greet();
+            this.combat.greet();
         } else {
             const online = Date.now() - this.hostSeenAt < PRESENCE_TIMEOUT_MS;
             if (online !== this.store.state.hostOnline) {
@@ -617,6 +724,13 @@ export class TableSession {
             else if (body.k === 'request') this.onRequest(inner.f, body);
             else if (body.k === 'claim') this.onClaim(inner.f, body);
             else if (body.k === 'act') this.onAct(inner.f, body);
+            else if (body.k === 'pc' && this.names.has(inner.f)) this.combat.onPc(inner.f, this.names.get(inner.f)!, body);
+            else if (body.k === 'enter') this.onEnter(inner.f, body);
+            else if (body.k === 'turn' && this.names.has(inner.f)) this.combat.onTurn(inner.f, body);
+            else if (body.k === 'mstat' && this.names.has(inner.f)) {
+                this.music.onStat(inner.f, body);
+                if (body.failed.some((id) => this.map.missing(id))) void this.map.verify();
+            }
             return;
         }
 
@@ -684,6 +798,26 @@ export class TableSession {
                 break;
             }
 
+            case 'library':
+                this.music.onLibrary(body.tracks);
+                break;
+
+            case 'music':
+                this.music.onMusic(body);
+                break;
+
+            case 'map':
+                this.map.onMap(body);
+                break;
+
+            case 'turns':
+                this.combat.onTurns(body.turns);
+                break;
+
+            case 'pcop':
+                this.combat.onPcop(body);
+                break;
+
             case 'kick':
                 if (body.id === this.store.state.myId) {
                     this.leave();
@@ -716,7 +850,16 @@ export class TableSession {
                 .filter((r) => !r.hidden)
                 .slice(0, LIMITS.MAX_SYNC)
                 .map(stripLocal);
-            if (rolls.length) void this.publish({ k: 'sync', rolls });
+            /* In two parts: a client from before rolls carried a bonus, pain
+               or target refuses a whole sync holding one, and would otherwise
+               lose every plain roll with it. Receivers merge by id and time. */
+            const plain = rolls.filter((r) => !hasExtras(r));
+            const extended = rolls.filter(hasExtras);
+            if (plain.length) void this.publish({ k: 'sync', rolls: plain });
+            if (extended.length) void this.publish({ k: 'sync', rolls: extended });
+            this.map.greet();
+            this.music.greet();
+            this.combat.greet();
         }
 
         /* The combat board goes with every answer, not only the first: a
@@ -783,7 +926,31 @@ export class TableSession {
             if (oldest !== undefined) this.handledRids.delete(oldest);
         }
 
-        this.execute(body.count, body.sides, who, body.note, body.rid, false, false);
+        this.execute(body.count, body.sides, who, body.note, body.rid, false, false, extrasOf(body));
+    }
+
+    /** A player brings characters into the fight: one initiative roll each,
+        1d6 + Dexterity + Alert + their modifier, rolled here like any other
+        die and published, then handed to the GM screen with the totals. */
+    private onEnter(id: string, body: Extract<Body, { k: 'enter' }>): void {
+        const who = this.names.get(id);
+        if (!who || this.handledRids.has(body.rid)) return;
+        const keys = body.chars.map((c) => c.key);
+        if (!this.combat.canEnter(id, keys)) {
+            this.notify(who + ' tried to join a fight, but none is open on the table.');
+            return;
+        }
+        if (!this.allow(id)) {
+            this.notify(who + ' is rolling faster than the table can follow.');
+            return;
+        }
+        this.handledRids.add(body.rid);
+        const chars = body.chars.map((c) => {
+            const name = this.combat.charName(id, c.key) || 'Character';
+            const roll = this.execute(1, 6, who, name + ' · Initiative', body.rid, false, false, { bonus: c.bonus });
+            return { key: c.key, init: roll.total };
+        });
+        this.combat.entered(id, who, chars);
     }
 
     private allow(id: string): boolean {
@@ -814,6 +981,7 @@ export class TableSession {
                 this.controls.delete(id);
                 this.claimSeen.delete(id);
                 this.kitsSent.delete(id);
+                this.music.forget(id);
                 changed = true;
             }
         }
@@ -834,10 +1002,11 @@ export class TableSession {
         `request` to itself. */
     private execute(
         count: number, sides: number, who: string, note: string | undefined,
-        rid: string | undefined, hidden: boolean, scripted: boolean,
-    ): void {
+        rid: string | undefined, hidden: boolean, scripted: boolean, extras: RollExtras = {},
+    ): LocalRoll {
         let vals: number[];
-        if (scripted) {
+        /* A sum roll has no successes to script; it is rolled straight. */
+        if (scripted && extras.bonus === undefined) {
             const s = this.store.state;
             vals = sides === 6
                 ? fabricateD6(count, s.scriptSuccesses)
@@ -848,8 +1017,9 @@ export class TableSession {
             vals = roll(count, sides, {}, CRIT_MARGIN).vals;
         }
 
-        const total = vals.reduce((a, b) => a + b, 0);
-        const succ = sides === 6 ? vals.filter((v) => v >= 4).length : null;
+        /* The same arithmetic every receiver redoes in parseRoll. */
+        const total = vals.reduce((a, b) => a + b, 0) + (extras.bonus ?? 0);
+        const succ = sides === 6 && extras.bonus === undefined ? vals.filter((v) => v >= 4).length : null;
 
         const entry: LocalRoll = {
             id: randomId(),
@@ -857,10 +1027,11 @@ export class TableSession {
             vals,
             total,
             succ,
-            net: succ,
+            net: succ === null ? null : Math.max(0, succ - (extras.pain ?? 0)),
             t: Date.now(),
             who,
             note: note || undefined,
+            ...extras,
         };
 
         this.store.update((s) => {
@@ -871,6 +1042,7 @@ export class TableSession {
            flag telling clients to look away. Nothing leaves this browser, so
            there is nothing for a patched client at the table to reveal. */
         if (!hidden) void this.publish({ k: 'result', rid, roll: stripLocal(entry) });
+        return entry;
     }
 
     /* ------------------------------------------------------- player actions */
@@ -899,6 +1071,41 @@ export class TableSession {
         });
     }
 
+    /** A roll off a character sheet — a move's accuracy, an evasion, the
+        initiative — rather than off the dice controls. Always a request to the
+        GM, published for the whole table: a player's character panel is never
+        on the host's page. `who` is still the player's own name; the note says
+        which character and what for. */
+    rollFor(count: number, sides: number, note: string, extras: RollExtras = {}): void {
+        const s = this.store.state;
+        if (s.isHost) return;
+        count = clamp(count, LIMITS.MIN_COUNT, LIMITS.MAX_COUNT);
+        sides = clamp(sides, LIMITS.MIN_SIDES, LIMITS.MAX_SIDES);
+        const rid = randomId(8);
+        const body: Body = {
+            k: 'request', rid, count, sides,
+            note: cleanText(note, LIMITS.MAX_NOTE) || undefined,
+            ...cleanExtras(extras),
+        };
+        const label = count + 'd' + sides + (extras.bonus !== undefined ? signed(extras.bonus) : '');
+        this.store.update((st) => {
+            st.pending = [...st.pending, { rid, label, at: Date.now() }];
+        });
+        void this.publish(body).then((sent) => {
+            if (!sent) this.queue.push(body);
+        });
+    }
+
+    /** Brings characters into the fight on the table (combatShare.ts); the
+        initiative rolls come back like any other. */
+    enterCombat(trainerId: string, chars: { key: CharKey; bonus: number; slot: number | null }[]): void {
+        const rid = this.combat.enter(trainerId, chars);
+        if (!rid) return;
+        this.store.update((st) => {
+            st.pending = [...st.pending, { rid, label: 'Initiative', at: Date.now() }];
+        });
+    }
+
     cancelPending(rid: string): void {
         this.queue = this.queue.filter((b) => b.k !== 'request' || b.rid !== rid);
         this.store.update((s) => { s.pending = s.pending.filter((p) => p.rid !== rid); });
@@ -919,7 +1126,7 @@ export class TableSession {
         const json = JSON.stringify([fights, access]);
         if (json === this.combatJson) return;
         this.combatJson = json;
-        this.combat = fights;
+        this.fights = fights;
         this.combatAccess = access;
         if (this.combatTimer !== null) clearTimeout(this.combatTimer);
         this.combatTimer = window.setTimeout(() => {
@@ -934,8 +1141,8 @@ export class TableSession {
         Built here on the GM's machine and sent to that player's browser
         alone, so a fight kept from someone never reaches their device. */
     private sendCombatTo(id: string, force: boolean): void {
-        if (!this.combat) return;
-        const mine = fitCombat(this.combat.filter((f) => {
+        if (!this.fights) return;
+        const mine = fitCombat(this.fights.filter((f) => {
             const who = this.combatAccess[f.id];
             return !who || who.includes(id);
         }));
@@ -1000,6 +1207,8 @@ export class TableSession {
         this.controls.delete(id);
         this.claimSeen.delete(id);
         this.kitsSent.delete(id);
+        this.music.forget(id);
+        this.combat.forget(id);
         void this.publish({ k: 'kick', id });
         void this.publishRoster();
     }
@@ -1078,7 +1287,36 @@ function stripLocal(r: LocalRoll): WireRoll {
     return {
         id: r.id, label: r.label, vals: r.vals, total: r.total,
         succ: r.succ, net: r.net, t: r.t, who: r.who, note: r.note,
+        ...extrasOf(r),
     };
+}
+
+/** Only the extras a message actually carries: an absent field stays absent,
+    because the validator reads `undefined` and a missing key alike but an
+    older peer's `exactly()` does not. */
+function extrasOf(r: RollExtras): RollExtras {
+    const out: RollExtras = {};
+    if (r.bonus !== undefined) out.bonus = r.bonus;
+    if (r.pain !== undefined) out.pain = r.pain;
+    if (r.need !== undefined) out.need = r.need;
+    return out;
+}
+
+/** Clamped to what the validator accepts; a zero pain is left off the wire. */
+function cleanExtras(e: RollExtras): RollExtras {
+    if (e.bonus !== undefined) return { bonus: clamp(e.bonus, LIMITS.MIN_BONUS, LIMITS.MAX_BONUS) };
+    const out: RollExtras = {};
+    if (e.pain) out.pain = clamp(e.pain, 0, LIMITS.MAX_PAIN);
+    if (e.need !== undefined) out.need = clamp(e.need, 1, LIMITS.MAX_NEED);
+    return out;
+}
+
+function hasExtras(r: WireRoll): boolean {
+    return r.bonus !== undefined || r.pain !== undefined || r.need !== undefined;
+}
+
+function signed(n: number): string {
+    return n < 0 ? ' − ' + Math.abs(n) : ' + ' + n;
 }
 
 function describe(e: unknown): string {

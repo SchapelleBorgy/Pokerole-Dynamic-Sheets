@@ -10,7 +10,7 @@
 /*  `wrangler deploy` prints the URL it published to. Paste it here with the  */
 /*  scheme changed from https:// to wss:// and no trailing slash.            */
 /* ------------------------------------------------------------------------ */
-export const PRODUCTION_RELAY = 'wss://pokerole-rolling-table.YOUR-SUBDOMAIN.workers.dev';
+export const PRODUCTION_RELAY = 'wss://pokerole-rolling-table.tearmoon96.workers.dev';
 
 /* A local override counts as configured, or testing against `wrangler dev`
    before the first deploy would hit the "no relay set up" notice instead of the
@@ -19,10 +19,17 @@ export function relayConfigured(): boolean {
     return localOverride() !== null || !PRODUCTION_RELAY.includes('YOUR-SUBDOMAIN');
 }
 
-/* With no relay deployed the table still works: browsers connect to each other
-   directly (peerTransport.ts). A relay, once set, takes over. */
+/* This copy of the site connects the table's browsers to each other directly
+   (peerTransport.ts) rather than through the relay above, which is the
+   original site's own. That keeps each player's fights on their device alone,
+   and keeps the table off a server this copy does not run. The shared map and
+   the music need a relay's file store and clock, so they stay off while this
+   is true. A local `?relay=` override still wins, for testing a relay. */
+const DIRECT = true;
+
 export function peerToPeer(): boolean {
-    return !relayConfigured();
+    if (localOverride() !== null) return false;
+    return DIRECT || !relayConfigured();
 }
 
 /* ========================================================================= */

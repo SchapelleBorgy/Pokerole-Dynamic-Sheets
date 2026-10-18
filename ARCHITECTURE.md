@@ -99,7 +99,7 @@ than imported, so Vite never parses or bundles them. One line in each page shell
 | `src/state/` | Trainer sheet store, working set, trainer file I/O, PC boxes, IndexedDB |
 | `src/card/` | Card logic: pools, moves, evolution, type chart, weather, ailments, wild import |
 | `src/gm/` | GM logic: entities and tokens, combat, ailments, dice, names, the random Pokémon generator with its habitat and generation tables, session files, folders |
-| `src/table/` | Rolling table: crypto, identity, protocol, validation, transport, session |
+| `src/table/` | Rolling table: crypto, identity, protocol, validation, transport, session, the relay's file store and clock, the shared map (`mapShare.ts`) and the music (`music/`) |
 | `src/map/` | Map Maker logic: the map document, terrain and landmark catalogues, styles, contours, rendering, the store, map files |
 | `src/data/` | Loading `app-data/`, and the context that serves it to components |
 | `src/lib/` | Cross-page helpers: themes, sprites, colour, gear, file system, manuals, update check, device class, touch reordering, the rank table |
@@ -160,6 +160,14 @@ zoom or grid setting ever moves anything.
   terrain. [`render/fog.ts`](src/map/render/fog.ts) turns it into one
   blurred picture that the page lays over every object (`FogLayer` in
   `MapCanvas.tsx`) and the PNG export draws last.
+- **Sketches** ([`src/map/sketch.ts`](src/map/sketch.ts)): freehand lines
+  over the map — pen, marker, dashed, dotted, any colour, an optional
+  arrowhead — kept as point lists in cells (`MapDoc.sketches`), drawn over
+  the labels and under the tokens. The page's SVG and the export's canvas
+  draw them from the same helpers; a sketch is one stroke, so a translucent
+  marker never darkens where it crosses itself. They are objects like any
+  other — selectable, movable, erasable — and the sketch tool has its own
+  "rub out" mode that removes whole lines.
 - **The background** is a layer under the painting: a bare sample (stored as
   `_`) shows the map's `background` terrain, whatever it is at the time. The
   eraser paints bare samples, so rubbing out uncovers it, and swapping the
@@ -170,8 +178,22 @@ zoom or grid setting ever moves anything.
   down by the terrain brush or the Borders brush) beats a terrain's own
   setting, which beats the map's. Soft edges are drawn by painting each
   terrain's ground through a blurred mask of where it lies; the masks add up
-  to one, so textures cross-fade without smearing. The pixel styles dither the
-  same blend instead of fading it.
+  to one, so the colours cross-fade without smearing; a terrain blends only
+  with the ones it has a Soft edge to. Soft never joins land and water, nor
+  anything and the background: those edges are drawn as None. The pixel
+  styles dither the same blend instead of fading it.
+- **Inland water** — Lake and River (`inland` in
+  [`src/map/terrain.ts`](src/map/terrain.ts)) — gets none of the sea's
+  shallows: the depth field counts it as neither water nor land, and the
+  coastal wash is clipped out of it. Where the edge to land is left to the
+  style it is drawn as a shoreline instead, in the style's `shore` look.
+- **Markers** — trees, tufts, peaks, stones — are drawn whole or not at all
+  ([`render/markers.ts`](src/map/render/markers.ts)). Each painter in
+  [`render/patterns.ts`](src/map/render/patterns.ts) marks where a marker
+  starts, so its tile can be split into ground texture and single markers;
+  a marker stays only if all its ink lands on its own terrain. The tile is
+  still used inside large areas, and only the markers near an edge are drawn
+  one by one.
 - **Styles** ([`src/map/styles.ts`](src/map/styles.ts)) are data: terrain
   colours and textures, edge treatment, path looks, label fonts. Hand-drawn and
   Anime trace the samples into smooth outlines (marching squares in
@@ -228,6 +250,87 @@ shared table and the solo GM board cannot drift on what a die does. Receivers
 recompute a roll's total and successes from its faces rather than trusting the
 summary — which is also why a GM's scripted roll fabricates real faces that add
 up to the intended outcome instead of asserting a number.
+
+### The shared map and the music
+
+Both move files too big for a socket frame, so the relay also keeps a small
+**file store** per room ([`blobs.ts`](src/table/blobs.ts)): a file is cut into
+1 MB parts, each sealed with the room key, its index and the part count as
+additional data (so the store cannot reorder, drop or swap them), and only a
+reference — id, size and SHA-256 — travels on the socket, signed by the GM. The
+store is still blind. Only the GM writes to it: the host's page claims the room
+with a random upload key on connect, and the relay keeps only that key's hash.
+
+**The maps** ([`mapShare.ts`](src/table/mapShare.ts)) are pictures the GM's
+browser uploads as they arrive. The GM can hold up to twelve and shows at most
+one — the active map; switching is instant, since every picture is already on
+the relay. Only the active map is ever announced, so no player can fetch one
+early, or learn that the others exist. The picture comes from an image file or from the Map
+Maker in another tab of the same browser, over a same-origin `BroadcastChannel`
+([`src/lib/tableLink.ts`](src/lib/tableLink.ts)): a one-off snapshot, or **live**,
+where every finished edit is sent on its own ([`src/map/tableLive.ts`](src/map/tableLive.ts)).
+A Map Maker map is one entry at the table however often it is sent; a live one
+keeps up while another map is on show.
+The fog of war is enforced by what is drawn
+([`playerView.ts`](src/map/render/playerView.ts)): the map data never leaves
+the GM's browser, the fog is always drawn and sealed back to full strength
+after its blur, objects anchored under full fog are not drawn at all, a live
+change goes out when the GM presses **Sync** (or Ctrl+Enter), unless they
+turned on automatic sync, which waits for the map to be still for their own
+two waits — after any change, and after one that uncovers fog; an undo inside
+the wait sends nothing — and an
+update that uncovers more than a set share of the map, or clears it, is held
+until the GM says yes. The GM can also keep a live map's landmarks, tokens and
+labels off the players' picture, one by one or a whole kind, from the table's
+map list: the choice rides the table's beat to the Map Maker, which draws the
+picture players already have again without them — never the map as it is now,
+which may hold edits not yet synced.
+
+**The music** ([`src/table/music/`](src/table/music/)) is never streamed. Every
+browser holds its own copy of each track — files downloaded ahead of time,
+YouTube links in each player's own YouTube player, kept on the page for its
+sound but never shown — and the GM publishes only
+what the two decks (Background and Scene) are doing: track, playing or not,
+and "`pos` seconds in at table-clock time `ref`". The table clock is the relay's
+([`clock.ts`](src/table/clock.ts)): every browser pings it NTP-style over its
+socket, and the relay answers the sender alone. Each browser steers its own
+player to where the clock says the deck should be — jumping when far out,
+playing up to 5% faster or slower when a little out, and learning how late its
+player starts so a jump lands on time. Starts are scheduled 1.2 s ahead, and a
+**ready check** holds a start until every player has the track and has enabled
+sound, or until the GM starts anyway. The media clock already counts the
+output's own delay, so Bluetooth headphones need no setting of their own. A
+track's title reaches the players only once the GM reveals it; until then it
+goes out empty. A deck can fade: the fade travels in the deck's state as a
+start time on the table clock and a length, so every browser sweeps its own
+volume in step, and a fade-out ends in the pause or stop it was for.
+
+### Characters and the fight
+
+**A player's own character** sits in the side column
+([`CharacterPanel.tsx`](src/components/table/CharacterPanel.tsx)): a trainer
+from this browser's working set — the same `pokerole_working` the License and
+the cards use on this origin — drawn with the GM roster's rows and the move
+panel ([`MoveTip.tsx`](src/components/gm/MoveTip.tsx), shared with the GM
+screen's `MovePanel`). Its quick rolls are ordinary requests to the GM, now
+able to carry a `bonus` (initiative), `pain` and a target `need`; every
+receiver still recomputes total, successes and net from the faces. The game
+database is loaded only for this panel, after joining.
+
+**The fight** is run in the GM screen's combat tracker, which keeps turns
+([`src/gm/turns.ts`](src/gm/turns.ts)): five actions a Round, taken one turn
+at a time in passes, a delay reordering one pass only. The GM puts one fight
+on the table; the GM screen and the hosting table tab talk over a second
+same-origin channel ([`src/lib/combatLink.ts`](src/lib/combatLink.ts)), and
+the table ([`combatShare.ts`](src/table/combatShare.ts)) shows players a turn
+strip — names, faces, order, whose turn, and counts only on their own
+characters. Players enter with an initiative the host rolls; their characters
+reach the GM screen as cut-down copies ([`slim.ts`](src/table/slim.ts),
+`GmState.tablePcs`, the `p:<member>:<key>` token), kept in step both ways:
+the player's sheet whenever it changes, the GM's edits as values with an id
+the player acknowledges. A player may pass, delay or spend actions only for
+combatants the strip marks as theirs, checked on the host and again in the
+GM screen. The relay is unchanged.
 
 ## Phones and tablets
 

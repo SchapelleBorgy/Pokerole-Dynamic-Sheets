@@ -3,7 +3,12 @@
    Two halves, like a GM screen with the dice tray beside it: the shared dice
    on the left, and on the right the GM's whole board for the GM, or just the
    combat trackers for a player. A narrow screen shows one half at a time
-   behind a pair of tabs. */
+   behind a pair of tabs.
+
+   The turn strip heads the right half when the GM has put a fight on the
+   table, and a player's own trainer and team sit in the dice half. The shared
+   map and the music need a relay (relay.ts), so at a table whose browsers
+   connect directly they are not offered. */
 
 import { useState } from 'react';
 import { useTable } from '../../table/TableContext';
@@ -14,6 +19,13 @@ import { RollFeed } from './RollFeed';
 import { HostBoard } from './HostBoard';
 import { PlayerCombat } from './PlayerCombat';
 import { HomeButton } from '../common/HomeButton';
+import { MapStage } from './MapStage';
+import { MapControls } from './MapControls';
+import { MusicPanel } from './MusicPanel';
+import { CharacterPanel } from './CharacterPanel';
+import { TurnStrip } from './TurnStrip';
+import { CHANNELS } from '../../table/protocol';
+import { peerToPeer } from '../../table/relay';
 
 /* Whether the invite and the member list are folded away, per browser. */
 const PEOPLE_KEY = 'pokerole_table_people_open';
@@ -29,6 +41,12 @@ export function TableView() {
        at the table uses, and the other is one tap away. */
     const [pane, setPane] = useState<'dice' | 'board'>('dice');
     const [peopleOpen, setPeopleOpen] = useState(peopleOpenAtStart);
+
+    const media = !peerToPeer();
+    const map = session.map.view;
+    const music = session.music.view;
+    const mapOn = media && map.show && (!!map.url || map.loading !== null || !!map.error);
+    const silenced = media && !music.unlocked && CHANNELS.some((c) => music.decks[c].playing);
 
     const connection = status === 'online'
         ? (isHost || hostOnline ? 'live' : 'waiting')
@@ -62,6 +80,15 @@ export function TableView() {
 
             {state.statusDetail && (
                 <p className="table-banner">{state.statusDetail}</p>
+            )}
+
+            {silenced && (
+                <p className="table-sound-banner" role="status">
+                    <i className="fa-solid fa-music"></i> The GM is playing music.
+                    <button className="accent" onClick={() => session.music.unlock()}>
+                        <i className="fa-solid fa-volume-high"></i> Enable sound
+                    </button>
+                </p>
             )}
 
             {state.notice && (
@@ -103,6 +130,10 @@ export function TableView() {
                             <MemberList />
                         </details>
 
+                        {!isHost && <CharacterPanel />}
+                        {media && isHost && <MapControls />}
+                        {media && <MusicPanel />}
+
                         <RollFeed rolls={state.rolls} myName={state.myName} />
                     </div>
 
@@ -134,6 +165,12 @@ export function TableView() {
                 </aside>
 
                 <section className="table-board" aria-label={isHost ? 'GM screen' : 'Combat'}>
+                    <TurnStrip />
+                    {mapOn && (
+                        <div className="table-stage board-stage" aria-label="The shared map">
+                            <MapStage />
+                        </div>
+                    )}
                     {isHost ? <HostBoard /> : <PlayerCombat />}
                 </section>
             </div>

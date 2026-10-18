@@ -27,6 +27,9 @@
 @import './table/layout.css';
 @import './table/join.css';
 @import './table/feed.css';
+@import './table/media.css';
+@import './table/character.css';
+@import './table/turns.css';
 @import './shared/tooltip.css';
 
 /* The mobile / tablet wrapper, last so it settles ties against the desktop

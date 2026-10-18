@@ -21,7 +21,8 @@ export type HotkeyAction =
     | `tool:${Tool}`
     | 'pan-hold' | 'fit' | 'zoom-in' | 'zoom-out' | 'grid'
     | 'undo' | 'redo' | 'duplicate' | 'select-all' | 'delete' | 'deselect'
-    | 'brush-smaller' | 'brush-larger';
+    | 'brush-smaller' | 'brush-larger'
+    | 'table-live' | 'table-sync';
 
 export interface HotkeyActionDef { action: HotkeyAction; name: string; group: string }
 
@@ -34,6 +35,7 @@ export const HOTKEY_ACTIONS: HotkeyActionDef[] = [
     { action: 'tool:stamp', name: 'Place a landmark', group: 'Tools' },
     { action: 'tool:token', name: 'Place a token', group: 'Tools' },
     { action: 'tool:label', name: 'Add a label', group: 'Tools' },
+    { action: 'tool:sketch', name: 'Sketch', group: 'Tools' },
     { action: 'tool:erase', name: 'Eraser', group: 'Tools' },
     { action: 'tool:edge', name: 'Borders', group: 'Tools' },
     { action: 'tool:fog', name: 'Fog of war', group: 'Tools' },
@@ -51,6 +53,8 @@ export const HOTKEY_ACTIONS: HotkeyActionDef[] = [
     { action: 'deselect', name: 'Clear the selection', group: 'Edit' },
     { action: 'brush-smaller', name: 'Smaller brush', group: 'Brush' },
     { action: 'brush-larger', name: 'Larger brush', group: 'Brush' },
+    { action: 'table-live', name: 'Pause or resume the live map at the table', group: 'Rolling table' },
+    { action: 'table-sync', name: 'Sync the live map: send your changes to the table', group: 'Rolling table' },
 ];
 
 export type Bindings = Partial<Record<HotkeyAction, string[]>>;
@@ -75,6 +79,8 @@ const COMMON: Bindings = {
     deselect: ['Escape'],
     'brush-smaller': ['['],
     'brush-larger': [']'],
+    'table-live': ['Ctrl+Shift+L'],
+    'table-sync': ['Ctrl+Enter'],
 };
 
 export const BUILTIN_PROFILES: HotkeyProfile[] = [
@@ -92,6 +98,7 @@ export const BUILTIN_PROFILES: HotkeyProfile[] = [
             'tool:stamp': ['S'],
             'tool:token': ['T'],
             'tool:label': ['L'],
+            'tool:sketch': ['D'],
             'tool:erase': ['E'],
             'tool:edge': ['O'],
             'tool:fog': ['F'],
@@ -117,6 +124,7 @@ export const BUILTIN_PROFILES: HotkeyProfile[] = [
             'tool:token': ['A'],
             'tool:stamp': ['S'],
             'tool:label': ['D'],
+            'tool:sketch': ['G'],
             'tool:erase': ['C'],
             'tool:edge': ['Z'],
             'tool:fog': ['X'],

@@ -21,7 +21,7 @@ import { SideScroll } from '../common/SideScroll';
 import { PoolBar } from '../gm/RosterBits';
 import { StatusChips } from '../gm/StatusChips';
 import { RollHistoryEntry, RollOutput } from '../gm/DicePanel';
-import { CAT_COLORS } from '../gm/MovePanel';
+import { CAT_COLORS } from '../gm/MoveTip';
 import { useTable } from '../../table/TableContext';
 import { ailmentByKey, defaultStatus } from '../../gm/ailments';
 import type { GmStatus } from '../../gm/ailments';
