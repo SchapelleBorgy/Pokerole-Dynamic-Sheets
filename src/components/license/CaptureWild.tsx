@@ -3,6 +3,7 @@ import { useSheetStore } from '../../state/SheetContext';
 import { useAppData } from '../../data/AppDataContext';
 import { useToast } from '../common/Toast';
 import { WILD_MARKER } from '../../state/constants';
+import { HOMEBREW_FIELD, adoptHomebrew } from '../../data/homebrew';
 import { genUid } from '../../state/defaults';
 import { addMonToTrainer } from '../../state/boxes';
 import type { MonEntry, TrainerState } from '../../state/types';
@@ -26,6 +27,7 @@ export function CaptureWildButton() {
             return;
         }
 
+        adoptHomebrew(parsed[HOMEBREW_FIELD]);
         const dexId = parsed.dexId as string;
         const p = data.pokemon.find((x) => x._id === dexId);
         const caught = p ? p.Name : dexId;

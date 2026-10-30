@@ -19,6 +19,7 @@ import { readWorking, upsertWorkingTrainer, workingTrainerData } from '../../gm/
 import { isEmptyMods, modsOfTrainer } from '../../lib/combatMods';
 import { TRAINER_MARKER } from '../../state/constants';
 import { WILD_MARKER, wildSheetKey } from '../../card/cardContext';
+import { HOMEBREW_FIELD, adoptHomebrew } from '../../data/homebrew';
 import { wildUrl } from '../../card/wild';
 import type { GmCombatant } from '../../gm/types';
 import type { PokedexEntry } from '../../data/types';
@@ -82,6 +83,8 @@ export function RosterPanel({ onReorder, onOpenTip, cycleStatus }: {
             let parsed: Record<string, unknown>;
             try { parsed = JSON.parse(await file.text()); }
             catch { skipped++; continue; }
+            /* Trainer and wild files both carry their homebrew species. */
+            if (parsed) adoptHomebrew(parsed[HOMEBREW_FIELD]);
 
             if (parsed && parsed[WILD_MARKER] && parsed.dexId) {
                 wilds.push({

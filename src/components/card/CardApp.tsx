@@ -20,6 +20,7 @@ import {
 } from './ConfirmModals';
 import { CloseWildModal, WildNav, WildSwitcherModal } from './WildSwitcher';
 import { WildActions } from './WildActions';
+import { HomebrewHub } from './HomebrewHub';
 import {
     buildEvolvedSheet, forwardEvolutions, isMegaForm, megaEvolutions, megaRevertTargetId,
 } from '../../card/evolution';
@@ -53,8 +54,12 @@ export function CardApp() {
     const { data } = useAppData();
     const ctx = store.ctx;
 
-    /* Paint the theme before the browser shows a frame. */
-    useLayoutEffect(() => { applyCardTheme(pokemon, sheet); }, [pokemon, sheet.themeType, sheet.pageTheme]);
+    /* Paint the theme before the browser shows a frame. The empty landing has
+       no Pokémon of its own (Misdreavus only fills the page under it), so it
+       wears the Dark License like the GM screen and the table. */
+    useLayoutEffect(() => {
+        applyCardTheme(pokemon, ctx.isBlank ? { ...sheet, pageTheme: 'License' } : sheet);
+    }, [pokemon, sheet.themeType, sheet.pageTheme, ctx.isBlank]);
 
     /* Offered once a Pokémon is on the card: the empty landing has nothing
        to show yet (and the question waits for it to go anyway). */
@@ -75,6 +80,7 @@ export function CardApp() {
     const [megaPending, setMegaPending] = useState<{ id: string; into: boolean } | null>(null);
     const [wildSwitcherOpen, setWildSwitcherOpen] = useState(false);
     const [closingWild, setClosingWild] = useState<string | null>(null);
+    const [homebrewOpen, setHomebrewOpen] = useState(false);
 
     const spriteInput = useRef<HTMLInputElement>(null);
     const wildJsonInput = useRef<HTMLInputElement>(null);
@@ -345,6 +351,18 @@ export function CardApp() {
         </button>
     );
 
+    const toolHomebrew = (
+        <button
+            key="homebrew"
+            className="type-eff-btn"
+            id="homebrew-tool"
+            onClick={() => setHomebrewOpen(true)}
+            title="Homebrew Pokémon: make a species of your own, or customise this one"
+        >
+            <i className="fa-solid fa-flask"></i>
+        </button>
+    );
+
     /* A team member's slot is fixed, so this is hidden in trainer mode. */
     const toolLoad = ctx.inTrainerMode ? null : (
         <button
@@ -381,10 +399,10 @@ export function CardApp() {
     const tools = ctx.wildMode ? (
         <>
             <div className="tool-row">{toolHome}{toolTour}{toolWildSheets}{toolLoad}{toolHeal}</div>
-            <div className="tool-row">{toolTypeEff}{toolAilments}{toolWeather}</div>
+            <div className="tool-row">{toolTypeEff}{toolAilments}{toolWeather}{toolHomebrew}</div>
         </>
     ) : (
-        <>{toolHome}{toolTour}{toolTypeEff}{toolAilments}{toolWeather}{toolHeal}{toolLoad}</>
+        <>{toolHome}{toolTour}{toolTypeEff}{toolAilments}{toolWeather}{toolHeal}{toolHomebrew}{toolLoad}</>
     );
 
     return (
@@ -582,12 +600,23 @@ export function CardApp() {
                 onConfirm={(wid) => { void closeWild(wid); }}
             />
 
+            <HomebrewHub
+                open={homebrewOpen}
+                current={ctx.isBlank ? null : pokemon}
+                inTrainer={ctx.inTrainerMode}
+                openAfterCreate={ctx.isBlank}
+                onClose={() => setHomebrewOpen(false)}
+                onOpen={(id) => { setHomebrewOpen(false); pickPokemon(id); }}
+                onUse={(id) => { setHomebrewOpen(false); transformInto(id, {}); }}
+            />
+
             <GuidedTour id="card" steps={CARD_STEPS} intro={CARD_TOUR_INTRO} />
 
             {ctx.isBlank && (
                 <BlankLanding
                     onLoad={() => setPicker({ wild: false })}
                     onWild={() => setPicker({ wild: true })}
+                    onHomebrew={() => setHomebrewOpen(true)}
                 />
             )}
         </>

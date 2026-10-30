@@ -517,6 +517,46 @@ closes or deletes someone else's. There is no database of ours.
 
 `contact-worker/README.md` has the App's settings and the harnesses.
 
+## Homebrew Pokémon
+
+A species made on the Pokémon card (the flask among the tools, or Create a
+Homebrew Pokémon on the empty card): name, dex number, category, art, typing,
+gender, attributes and limits, Base HP, the four ability slots, the learnset by
+rank, evolutions, and moves and abilities of its own.
+
+- `src/data/homebrew.ts` — the library (`pokerole_homebrew`), the cleaning of
+  anything read from a file, and `attachHomebrew`, which the loader calls: each
+  homebrew goes to the FRONT of `data.pokemon`, its moves and abilities into
+  theirs. Every page then finds it by id or name like any other species, so
+  nothing downstream knows the difference.
+- **Ids start `hb-`**, and so does `Image` (`hb-….png`). `lib/sprites.ts` and
+  the card's sprite panel ask `homebrewLook(image)`: each set (Home, Book, Box,
+  Token) draws its own uploaded art (`Arts`, WebP data URLs, 256 px at most),
+  else that set of the official species it borrows (`SpriteOf`), else another
+  set's art, else a Poké Ball.
+- `Tier` is the kind of Pokémon (Legendary, Mythical, Ultra Beast, Paradox, or
+  '' for Normal), one at a time; `Legendary` is set for every tier but Normal,
+  as the dex's own flag is.
+- The editor's species, move and ability fields are `Combo`
+  (`HomebrewFields.tsx`), the card's suggestion panel in a portal: a
+  `<datalist>` opens as the browser's own grey box. Types are `TypePicker`.
+- **Files carry their species.** `trainerJson` writes `homebrewSpecies` (every
+  homebrew on the team and in the boxes, plus what they evolve from or into);
+  `wildPayload` does the same; `normalizeState`, the wild import, the License's
+  capture and the GM roster's import adopt them. The newer copy (`Updated`)
+  wins. A homebrew the browser has never seen opens a notice on the card, never
+  another species: a trainer's card would save that species over its slot.
+- A name the official dex uses is refused by the editor and marked
+  "(Homebrew)" when it arrives in a file, since evolutions go by name.
+- `Number` is 0, so the GM's generator never rolls one.
+- Not carried: the rolling table's messages (a player's homebrew shows as an
+  unknown species to a GM in another browser) and the GM session file.
+
+`src/components/card/HomebrewHub.tsx` is the library window,
+`HomebrewEditor.tsx` the editor. Harnesses: `.verify/homebrew-test.mjs` (the
+data layer in Node, bundle from `homebrew-entry.ts`), `homebrew-e2e.mjs`
+(three browsers), `homebrew-license.mjs`, `homebrew-view.mjs [412 915]`.
+
 ## Guided tours
 
 Every page has a spotlight tour of a minute or so — one part lit, the rest

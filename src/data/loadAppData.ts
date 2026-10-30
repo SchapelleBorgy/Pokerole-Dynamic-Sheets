@@ -1,4 +1,5 @@
 import { DATA_BASE, IMG_BASE } from './paths';
+import { attachHomebrew } from './homebrew';
 import type {
     AppData, PokedexEntry, MoveEntry, ItemEntry, AbilityEntry, NatureEntry,
     EquipIcon, SpriteFrames,
@@ -55,7 +56,7 @@ export function loadAppData(): Promise<AppData> {
         for (const file of BUNDLES) await injectScript(DATA_BASE + file);
         await injectScript(CONSTS_SCRIPT).catch(() => { /* the icons fall back to none, as a missing bundle did */ });
         const w = window as unknown as Record<string, unknown>;
-        return {
+        const data: AppData = {
             pokemon: (w.ALL_POKEMON as PokedexEntry[]) ?? [],
             moves: (w.ALL_MOVES as MoveEntry[]) ?? [],
             items: (w.ALL_ITEMS as ItemEntry[]) ?? [],
@@ -69,6 +70,9 @@ export function loadAppData(): Promise<AppData> {
             version: (w.APP_VERSION as string) ?? '',
             repo: (w.APP_REPO as string) ?? '',
         };
+        /* The species made on the card join the dex here (data/homebrew). */
+        attachHomebrew(data);
+        return data;
     })();
     return pending;
 }

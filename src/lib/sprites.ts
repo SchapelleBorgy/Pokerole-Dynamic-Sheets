@@ -4,6 +4,8 @@ import {
 } from '../state/constants';
 import type { SpriteFrames } from '../data/types';
 import type { MonPreview, SpriteType } from '../state/types';
+import { homebrewLook } from '../data/homebrew';
+import type { SpriteSet } from '../data/homebrew';
 
 export const SPRITE_FOLDERS: Record<string, string> = {
     Home: 'HomeSprites', Book: 'BookSprites',
@@ -15,6 +17,10 @@ export const SPRITE_FOLDERS: Record<string, string> = {
    art instead of a broken "no image" icon. The <img> also gets a sprite-<kind>
    class so Home sprites can be sized down a touch. */
 export const TILE_SPRITE_FOLDERS = ['HomeSprites', 'BookSprites', 'BoxSprites', 'ShuffleTokens'];
+
+const FOLDER_SET: Record<string, SpriteSet> = {
+    HomeSprites: 'Home', BookSprites: 'Book', BoxSprites: 'Box', ShuffleTokens: 'Shuffle',
+};
 
 export const SPRITE_CLASS: Record<string, string> = {
     HomeSprites: 'sprite-home', BookSprites: 'sprite-book',
@@ -30,6 +36,14 @@ export function defaultPreview(): MonPreview {
    usable for this species, in which case the first that does. Shuffle is never
    a substitute — it is much the sparsest pack. */
 export function usableSpriteType(image: string | undefined, type: string): string {
+    /* A homebrew draws its own art for a set, else that set borrowed from
+       an official species, else the first set it has art for. */
+    const hb = homebrewLook(image);
+    if (hb) {
+        if (hb.arts[type as SpriteSet]) return type;
+        if (hb.spriteOf) return usableSpriteType(hb.spriteOf, type);
+        return (['Home', 'Book', 'Box', 'Shuffle'] as SpriteSet[]).find((k) => hb.arts[k]) || 'Home';
+    }
     const blocked = image && SPRITE_SET_BLOCKED[image];
     if (!blocked || blocked.indexOf(type) === -1) return type;
     return ['Home', 'Book', 'Box'].filter((t) => blocked.indexOf(t) === -1)[0] || 'Home';
@@ -37,6 +51,12 @@ export function usableSpriteType(image: string | undefined, type: string): strin
 
 /** Local copy first, GitHub-raw second — the chain an <img> walks on error. */
 export function speciesSpriteChain(image: string, folder: string): string[] {
+    const hb = homebrewLook(image);
+    if (hb) {
+        const own = hb.arts[FOLDER_SET[folder]];
+        if (own) return [own];
+        return hb.spriteOf ? speciesSpriteChain(hb.spriteOf, folder) : [hb.fallback];
+    }
     return [IMG_BASE + folder + '/' + image, GITHUB_RAW + '/images/' + folder + '/' + image];
 }
 
@@ -51,6 +71,13 @@ export function speciesSpriteChain(image: string, folder: string): string[] {
     entries are what they were meant to be: a last resort for art this install
     does not have in any pack. */
 export function tileSpriteChain(image: string): { url: string; className: string }[] {
+    const hb = homebrewLook(image);
+    if (hb) {
+        const own = TILE_SPRITE_FOLDERS.filter((f) => hb.arts[FOLDER_SET[f]])
+            .map((f) => ({ url: hb.arts[FOLDER_SET[f]]!, className: 'tile-sprite ' + SPRITE_CLASS[f] }));
+        if (own.length) return own;
+        return hb.spriteOf ? tileSpriteChain(hb.spriteOf) : [{ url: hb.fallback, className: 'tile-sprite sprite-home' }];
+    }
     const cls = (f: string) => 'tile-sprite ' + SPRITE_CLASS[f];
     return [
         ...TILE_SPRITE_FOLDERS.map((f) => ({ url: IMG_BASE + f + '/' + image, className: cls(f) })),
@@ -83,6 +110,9 @@ export interface SpriteFrame { scale: number; offsetX: number; offsetY: number }
 export function boxSpriteFrame(
     image: string | undefined, type: string, well: number, frames: SpriteFrames | undefined,
 ): SpriteFrame {
+    /* Borrowed art is framed by the species it belongs to; own art centred. */
+    const hb = homebrewLook(image);
+    if (hb && !hb.arts[type as SpriteSet] && hb.spriteOf) image = hb.spriteOf;
     const dflt = BOX_SPRITE_FRAME[type] || { scale: 1, offsetY: 0 };
     const table = (frames && (frames as unknown as Record<string, Record<string, [number, number, number]>>)[type]) || null;
     const f = (table && image) ? table[image] : null;
