@@ -89,9 +89,12 @@ export function relayBase(): string {
 }
 
 /** The socket URL for one room. The address is the only thing the relay is
-    ever told, and it cannot be turned back into a lobby id or a password. */
-export function roomUrl(addr: string): string {
-    return relayBase() + '/room/' + addr;
+    told about the table, and it cannot be turned back into a lobby id or a
+    password. The build and who is connecting (the GM, a player, or the GM's
+    door on a room left after a password change) go to the relay's anonymous
+    counter. */
+export function roomUrl(addr: string, role: 'gm' | 'pl' | 'door'): string {
+    return relayBase() + '/room/' + addr + '?v=' + encodeURIComponent(__APP_VERSION__) + '&r=' + role;
 }
 
 /** True when a relay is reachable at all — used by the join screen to say

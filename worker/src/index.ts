@@ -121,6 +121,13 @@ const REARM_MS = 5 * 60 * 1000;
    - `session`: a room emptied (or was wiped idle). double1 = the most people
      it held at once, double2 = minutes from its first socket to its last.
 
+   Both also carry three words of what connected (see `whoOf`): the page's
+   build, `gm` / `pl` / `door` (a GM's page keeping a room open after a
+   password change), and whether its tab was hidden. A `session` carries in
+   double3 the close code of its last socket (1000 left, 1001 the page went
+   away, 1006 the connection dropped; 0 when nobody closed it). None of it
+   names a person, a table or a device.
+
    A session's peak is the honest head count: a reload or a dropped Wi-Fi is
    a second `join` but not a second person. A GM preparing alone and reloading
    makes sessions of one, so the query script counts tables of two or more.
@@ -261,6 +268,21 @@ interface SocketMeta {
     n: number;
     /** When the current window opened. */
     since: number;
+    /** What connected, for the counter: build, role, hidden. */
+    who?: string[];
+}
+
+/** The counter's three words for a socket, from what its page put on the
+    URL. Anything unexpected is a plain '-': an older page sends none of it. */
+function whoOf(url: URL): string[] {
+    const v = url.searchParams.get('v') ?? '';
+    const r = url.searchParams.get('r') ?? '';
+    const h = url.searchParams.get('h');
+    return [
+        /^\d{1,3}(\.\d{1,3}){0,3}$/.test(v) ? v : '-',
+        r === 'gm' || r === 'pl' || r === 'door' ? r : '-',
+        h === '1' ? 'hidden' : h === '0' ? 'visible' : '-',
+    ];
 }
 
 export class TableRoom implements DurableObject {
@@ -291,9 +313,9 @@ export class TableRoom implements DurableObject {
     /* ------------------------------------------------------- the counter */
 
     /** One data point. Never throws: counting must not cost a table a socket. */
-    private count(kind: 'join' | 'session', doubles: number[]): void {
+    private count(kind: 'join' | 'session', doubles: number[], who: string[] = []): void {
         try {
-            this.env.STATS?.writeDataPoint({ blobs: [kind], doubles, indexes: [kind] });
+            this.env.STATS?.writeDataPoint({ blobs: [kind, ...who], doubles, indexes: [kind] });
         } catch { /* the counter is best effort */ }
     }
 
@@ -302,15 +324,16 @@ export class TableRoom implements DurableObject {
         return this.state.getWebSockets().filter((w) => w !== except && w.readyState === WebSocket.OPEN).length;
     }
 
-    /** Counts a finished session and forgets it. */
-    private async endSession(stats: RoomStats, end: number): Promise<void> {
-        this.count('session', [stats.peak, Math.max(0, Math.round((end - stats.start) / 60_000))]);
+    /** Counts a finished session and forgets it. `code` and `who` are the
+        last socket's, when one closed. */
+    private async endSession(stats: RoomStats, end: number, code = 0, who: string[] = []): Promise<void> {
+        this.count('session', [stats.peak, Math.max(0, Math.round((end - stats.start) / 60_000)), code], who);
         await this.state.storage.delete(STATS_KEY);
     }
 
     /** A socket just opened: `n` are open now, itself included. */
-    private async joined(n: number, now: number): Promise<void> {
-        this.count('join', [n]);
+    private async joined(n: number, now: number, who: string[]): Promise<void> {
+        this.count('join', [n], who);
         /* Never throws: this runs before the socket is handed back, so a
            storage write refused here would keep everyone out of the table. */
         try {
@@ -334,11 +357,12 @@ export class TableRoom implements DurableObject {
     }
 
     /** A socket went away; the last one out ends the session. */
-    private async left(ws: WebSocket): Promise<void> {
+    private async left(ws: WebSocket, code: number): Promise<void> {
         if (this.openSockets(ws) > 0) return;
         try {
             const stats = await this.state.storage.get<RoomStats>(STATS_KEY);
-            if (stats) await this.endSession(stats, Date.now());
+            const who = (ws.deserializeAttachment() as SocketMeta | null)?.who ?? [];
+            if (stats) await this.endSession(stats, Date.now(), code, who);
         } catch { /* the counter is best effort */ }
     }
 
@@ -357,9 +381,10 @@ export class TableRoom implements DurableObject {
            so an idle table costs nothing. It is also why per-socket state is
            serialised onto the socket rather than kept in a field. */
         this.state.acceptWebSocket(server);
-        server.serializeAttachment({ n: 0, since: Date.now() } satisfies SocketMeta);
+        const who = whoOf(new URL(req.url));
+        server.serializeAttachment({ n: 0, since: Date.now(), who } satisfies SocketMeta);
 
-        await this.joined(this.openSockets(), Date.now());
+        await this.joined(this.openSockets(), Date.now(), who);
         await this.rearm(Date.now());
 
         return new Response(null, { status: 101, webSocket: pair[0] });
@@ -416,12 +441,12 @@ export class TableRoom implements DurableObject {
     async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
         /* 1005 and 1006 mean "no code" and may not be sent back. */
         try { ws.close(code === 1005 || code === 1006 ? 1000 : code, reason); } catch { /* already gone */ }
-        await this.left(ws);
+        await this.left(ws, code);
     }
 
     async webSocketError(ws: WebSocket): Promise<void> {
         try { ws.close(1011, 'socket error'); } catch { /* already gone */ }
-        await this.left(ws);
+        await this.left(ws, 1006);
     }
 
     /** Two alarms: the idle wipe, IDLE_MS after the last activity, and —

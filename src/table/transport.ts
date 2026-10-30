@@ -77,7 +77,10 @@ export class RelayTransport {
 
         let ws: WebSocket;
         try {
-            ws = new WebSocket(this.url);
+            /* Whether the tab was in the background when it (re)connected: the
+               relay's counter keeps it, to tell a reconnect loop in a hidden tab
+               from people at a table. */
+            ws = new WebSocket(this.url + (this.url.includes('?') ? '&' : '?') + 'h=' + (document.hidden ? 1 : 0));
         } catch {
             /* A malformed URL, or a mixed-content block. Retrying will not fix
                either, but the status line is more use than a thrown error. */

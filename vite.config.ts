@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { createHash } from 'node:crypto';
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 
 /* The app and everything it needs to run live in APP_DIR; the repo root holds
@@ -120,6 +120,10 @@ export default defineConfig(({ command }) => {
            copy all 250 MB of it into the build on every run. */
         publicDir: 'public',
         appType: 'mpa',
+        /* Which build a table page is, for the relay's anonymous counter. */
+        define: {
+            __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version),
+        },
         plugins: [
             serveAppDataRaw(root),
             devPageAliases(PAGES),

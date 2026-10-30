@@ -98,3 +98,25 @@ if (total.tables) {
     console.log('\n' + (total.people / total.tables).toFixed(1) + ' people a table, '
         + Math.round(total.minutes / total.tables) + ' minutes a table on average.');
 }
+
+/* Sessions of one, by what connected last and how it closed. Only rooms
+   counted since the relay began recording it (blob2 set) appear. A run of
+   short ones from the same row is a page reconnecting in a loop. */
+const CODES = { 0: 'not closed', 1000: 'left', 1001: 'page went away', 1005: 'no code', 1006: 'dropped' };
+const solo = await sql(await accountId(), `
+    SELECT blob2 AS build, blob3 AS role, blob4 AS tab, double3 AS code,
+        sum(_sample_interval) AS sessions,
+        sumIf(_sample_interval, double2 <= 2) AS short
+    FROM pokerole_table
+    WHERE timestamp > now() - INTERVAL '${days}' DAY
+        AND blob1 = 'session' AND double1 < 2 AND blob2 != ''
+    GROUP BY build, role, tab, code
+    ORDER BY sessions DESC
+    LIMIT 20
+    FORMAT JSON`);
+if (solo.length) {
+    console.log('\nSolo sessions by what connected and how it closed (short = 2 minutes or less)\n');
+    const l = (c) => c.map((v, i) => String(v).padEnd(i < 4 ? [8, 6, 8, 16][i] : 0).padStart(i >= 4 ? 9 : 0)).join('  ');
+    console.log(l(['build', 'role', 'tab', 'closed', 'sessions', 'short']));
+    for (const r of solo) console.log(l([r.build, r.role, r.tab, CODES[n(r.code)] ?? String(n(r.code)), n(r.sessions), n(r.short)]));
+}

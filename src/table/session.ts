@@ -643,7 +643,7 @@ export class TableSession {
         this.keySentFor = null;
         this.dhKeys.clear();
         if (isHost) this.openDoors(identity, lobbyId);
-        this.transport = new RelayTransport(roomUrl(this.room.addr), {
+        this.transport = new RelayTransport(roomUrl(this.room.addr, isHost ? 'gm' : 'pl'), {
             onMessage: (text) => { void this.receive(text); },
             onStatus: (status, detail) => this.onStatus(status, detail),
             onClock: (text) => this.clock.onFrame(text),

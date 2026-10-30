@@ -99,7 +99,7 @@ export class Porter {
         const room = await deriveRoom(this.lobbyId, this.oldPassword);
         if (Date.now() >= this.until) return;
         this.room = room;
-        this.transport = new RelayTransport(roomUrl(room.addr), {
+        this.transport = new RelayTransport(roomUrl(room.addr, 'door'), {
             onMessage: (text) => { void this.receive(text); },
             onStatus: () => { /* nothing to show: this is a door, not the table */ },
             onClock: () => { /* no clock here */ },
