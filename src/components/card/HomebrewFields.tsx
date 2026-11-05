@@ -8,7 +8,7 @@ import { ThemeChip } from '../common/ThemeChip';
 /* The homebrew editor's two pickers.
 
    Combo replaces <datalist>, whose popup is the browser's own grey box and
-   takes no styling at all (CLAUDE.md, the native <select> note). It draws the
+   takes no styling at all. It draws the
    card's own suggestion panel (.move-suggestions) in a portal: inside the
    editor the tab body scrolls, and a panel in it would be cut off at its edge. */
 
