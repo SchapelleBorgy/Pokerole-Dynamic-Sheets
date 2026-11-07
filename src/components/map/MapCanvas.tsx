@@ -17,7 +17,7 @@ import { slotOf } from '../../map/store';
 import type { BrushSetting, MapUi } from '../../map/store';
 import { distToPolyline, simplify } from '../../map/geometry';
 import type { Pt } from '../../map/geometry';
-import { fillerTerrain, landmarkOf } from '../../map/landmarks';
+import { FILLER_PREFIX, FILLER_SIZE, landmarkOf } from '../../map/landmarks';
 import { CELL } from '../../map/render/patterns';
 import { buildGeometry, drawEdgeTint, drawGrid, drawTerrain, geometryKey } from '../../map/render/terrain';
 import { onPictureArrived, pictureNow } from '../../map/picture';
@@ -493,6 +493,20 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
             case 'fog':
             case 'unfog':
             case 'erase': {
+                if (tool === 'paint' && store.ui.paintLayer === 'single') {
+                    /* One filler, exactly where clicked: placed by eye, not on
+                       the grid. It is a landmark from here on. */
+                    if (!inside(at)) return;
+                    const landmark = FILLER_PREFIX + store.ui.singleFiller;
+                    const variant = store.ui.fillerVariant;
+                    const id = uid();
+                    store.edit((d) => {
+                        d.stamps = [...d.stamps, { id, landmark, variant, x: at[0], y: at[1], size: FILLER_SIZE, rotation: 0, flip: false, snap: false }];
+                    });
+                    /* Its panel opens under the palette, size slider and all. */
+                    store.setUi({ selection: [{ kind: 'stamp', id }] });
+                    return;
+                }
                 if (tool === 'erase' && store.ui.eraseMode === 'objects') {
                     store.checkpoint();
                     gesture.current = { kind: 'erase' };
@@ -568,16 +582,6 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                 if (!inside(at)) return;
                 const def = landmarkOf(store.ui.landmark);
                 const id = uid();
-                if (fillerTerrain(def.slug)) {
-                    /* A single filler goes exactly where it is clicked: it is
-                       placed by eye, not on the grid. */
-                    const variant = store.ui.fillerVariant;
-                    store.edit((d) => {
-                        d.stamps = [...d.stamps, { id, landmark: def.slug, variant, x: at[0], y: at[1], size: def.size, rotation: 0, flip: false, snap: false }];
-                    });
-                    store.setUi({ selection: [{ kind: 'stamp', id }] });
-                    return;
-                }
                 const [x, y] = place(at, def.size);
                 store.edit((d) => {
                     d.stamps = [...d.stamps, { id, landmark: def.slug, x, y, size: def.size, rotation: 0, flip: false }];
@@ -867,7 +871,7 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
 
     const W = doc.cols * CELL, H = doc.rows * CELL;
     const slot = brushTool(ui.tool, ui.eraseMode) ? slotOf(ui.tool) : null;
-    const showBrush = hover && (slot || ui.tool === 'fill') && !spaceHeld;
+    const showBrush = hover && (slot || ui.tool === 'fill') && !spaceHeld && !(ui.tool === 'paint' && ui.paintLayer === 'single');
     const cursorTool = spaceHeld ? 'pan' : ui.tool;
 
     return (

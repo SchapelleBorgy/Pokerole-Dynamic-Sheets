@@ -584,6 +584,8 @@
 
 /* Single fillers: their own markers as tiles, and a row to pick one by. */
 .map-filler-art { image-rendering: auto; }
+/* On the terrain's own ground, so dark ink reads on the dark panel. */
+.map-tile-art.map-filler-art { padding: 5px; border-radius: 7px; box-sizing: border-box; }
 .map-filler-art.pixelated, .map-filler-variant img.pixelated { image-rendering: pixelated; }
 .map-filler-variants {
     display: grid;
@@ -601,6 +603,7 @@
 .map-filler-variant img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .map-filler-variant[aria-pressed="true"] {
     border-color: var(--accent);
-    background: var(--accent-faint);
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
     box-shadow: 0 0 6px var(--accent-glow);
 }

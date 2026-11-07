@@ -52,22 +52,31 @@ function TerrainPalette({ style }: { style: MapStyle }) {
     useEffect(() => onImageArrived(() => setTick((n) => n + 1)), []);
     const backgrounds = new Map(TERRAINS.map((t) => [t.slug, swatchBackground(style, t.slug)]));
     const fillers = ui.tool !== 'fill' && ui.paintLayer === 'fillers';
+    /* One filler at a time is the Paint tool's alone: Shapes paint areas. */
+    const single = ui.tool === 'paint' && ui.paintLayer === 'single';
     const shape = ui.tool === 'shape';
     return (
         <section className="map-section">
             {shape && <ShapePicker />}
-            <h3>{fillers ? 'Fillers' : 'Terrain'}</h3>
+            <h3>{single ? 'One filler' : fillers ? 'Fillers' : 'Terrain'}</h3>
             {ui.tool !== 'fill' && (
                 <div className="map-segmented map-paint-layer" role="group" aria-label="What the brush paints">
-                    <button aria-pressed={!fillers} onClick={() => store.setUi({ paintLayer: 'terrain' })}>
+                    <button aria-pressed={!fillers && !single} onClick={() => store.setUi({ paintLayer: 'terrain' })}>
                         <i className="fa-solid fa-layer-group"></i> Terrain
                     </button>
-                    <button aria-pressed={fillers} onClick={() => store.setUi({ paintLayer: 'fillers' })}>
+                    <button aria-pressed={fillers} onClick={() => store.setUi({ paintLayer: 'fillers' })}
+                        title="Paint a terrain's peaks, trees or flowers over the ground, on top of its own">
                         <i className="fa-solid fa-mountain-sun"></i> Fillers only
                     </button>
+                    {ui.tool === 'paint' && (
+                        <button aria-pressed={single} onClick={() => store.setUi({ paintLayer: 'single' })}
+                            title="Place one peak or one tree where you click, then size and turn it like a landmark">
+                            <i className="fa-solid fa-tree"></i> One filler
+                        </button>
+                    )}
                 </div>
             )}
-            {fillers ? <FillerPalette style={style} backgrounds={backgrounds} /> : (<>
+            {single ? <SingleFillers style={style} /> : fillers ? <FillerPalette style={style} backgrounds={backgrounds} /> : (<>
             <div className="map-swatches">
                 {TERRAINS.map((t) => (
                     <button
@@ -348,10 +357,10 @@ function FogPalette({ clear }: { clear: boolean }) {
 
 function LandmarkPalette({ style }: { style: MapStyle }) {
     const { store, ui } = useMap();
-    const [group, setGroup] = useState<LandmarkGroup | 'all' | 'fillers'>(fillerTerrain(ui.landmark) ? 'fillers' : 'all');
+    const [group, setGroup] = useState<LandmarkGroup | 'all'>('all');
     const [query, setQuery] = useState('');
     const q = query.trim().toLowerCase();
-    const list = group === 'fillers' ? [] : LANDMARKS.filter((l) => (group === 'all' || l.group === group) && (!q || l.name.toLowerCase().includes(q)));
+    const list = LANDMARKS.filter((l) => (group === 'all' || l.group === group) && (!q || l.name.toLowerCase().includes(q)));
     return (
         <section className="map-section">
             <h3>Landmarks</h3>
@@ -360,17 +369,12 @@ function LandmarkPalette({ style }: { style: MapStyle }) {
                 {LANDMARK_GROUPS.map((g) => (
                     <button key={g.key} className="map-chip" aria-pressed={group === g.key} onClick={() => setGroup(g.key)}>{g.label}</button>
                 ))}
-                <button className="map-chip" data-group="fillers" aria-pressed={group === 'fillers'} onClick={() => setGroup('fillers')}
-                    title="One peak, one tree, one tuft of a terrain, placed and sized on its own">
-                    Fillers
-                </button>
             </div>
             <input
-                type="text" className="map-search" placeholder={group === 'fillers' ? 'Search terrains…' : 'Search landmarks…'} value={query}
+                type="text" className="map-search" placeholder="Search landmarks…" value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
             />
-            {group === 'fillers' && <SingleFillers style={style} query={q} />}
-            {group !== 'fillers' && <div className="map-tiles">
+            <div className="map-tiles">
                 {list.map((l) => (
                     <button
                         key={l.slug}
@@ -387,22 +391,22 @@ function LandmarkPalette({ style }: { style: MapStyle }) {
                     </button>
                 ))}
                 {!list.length && <p className="map-hint">No landmark matches.</p>}
-            </div>}
+            </div>
             <p className="map-hint">Click the map to place. {panHint()}</p>
         </section>
     );
 }
 
-/** A terrain's markers as single landmarks: pick the terrain, then which of
-    its markers. Placed where clicked, then moved, sized and turned like any
-    landmark. */
-function SingleFillers({ style, query }: { style: MapStyle; query: string }) {
+/** The Paint tool's "One filler": a terrain's markers as single landmarks.
+    Pick the terrain, then which of its markers; a click on the map places
+    it, and from then on it is moved, sized and turned like any landmark. */
+function SingleFillers({ style }: { style: MapStyle }) {
     const { store, ui } = useMap();
-    const terrains = fillerTerrains(style).filter((t) => !query || t.name.toLowerCase().includes(query));
-    const current = fillerTerrain(ui.landmark);
+    const terrains = fillerTerrains(style);
+    const current = terrains.some((t) => t.slug === ui.singleFiller) ? ui.singleFiller : null;
     const pick = (slug: string) => {
         const first = fillerVariants(style, slug)[0] ?? 0;
-        store.setUi({ landmark: FILLER_PREFIX + slug, fillerVariant: first, tool: 'stamp' });
+        store.setUi({ singleFiller: slug, fillerVariant: first });
     };
     return (
         <>
@@ -419,7 +423,8 @@ function SingleFillers({ style, query }: { style: MapStyle; query: string }) {
                             title={t.name + ': place its fillers one at a time'}
                             onClick={() => pick(t.slug)}
                         >
-                            {url && <img src={url} alt="" className={'map-tile-art map-filler-art' + (style.pixelated ? ' pixelated' : '')} />}
+                            {url && <img src={url} alt="" className={'map-tile-art map-filler-art' + (style.pixelated ? ' pixelated' : '')}
+                                style={{ background: style.terrain[t.slug]?.fill }} />}
                             <span className="map-tile-name">{t.name}</span>
                         </button>
                     );
@@ -427,7 +432,12 @@ function SingleFillers({ style, query }: { style: MapStyle; query: string }) {
                 {!terrains.length && <p className="map-hint">No terrain has fillers in this style.</p>}
             </div>
             {current && <FillerVariants style={style} terrain={current} value={ui.fillerVariant}
-                onPick={(v) => store.setUi({ fillerVariant: v, tool: 'stamp' })} />}
+                onPick={(v) => store.setUi({ fillerVariant: v })} />}
+            <p className="map-hint">
+                Click the map to place one {current ? TERRAINS.find((t) => t.slug === current)?.name.toLowerCase() : ''} filler
+                exactly there. Then, with Select, drag its corner to size it, its knob to turn it — or set both in its panel.
+                {' ' + panHint()}
+            </p>
         </>
     );
 }
@@ -443,7 +453,8 @@ function FillerVariants({ style, terrain, value, onPick }: {
             <span>Which one</span>
             <div className="map-filler-variants" role="group" aria-label="Which filler">
                 {variants.map((v) => (
-                    <button key={v} className="map-filler-variant" data-variant={v} aria-pressed={value === v} onClick={() => onPick(v)}>
+                    <button key={v} className="map-filler-variant" data-variant={v} aria-pressed={value === v} onClick={() => onPick(v)}
+                        style={{ background: style.terrain[terrain]?.fill }}>
                         <img src={fillerUrl(style, terrain, v) ?? ''} alt="" className={style.pixelated ? 'pixelated' : undefined} />
                     </button>
                 ))}

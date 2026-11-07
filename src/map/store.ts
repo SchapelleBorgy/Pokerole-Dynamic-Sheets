@@ -58,7 +58,10 @@ export interface MapUi {
     brushes: Record<BrushSlot, BrushSetting>;
     /** What the terrain brush lays down: whole terrain, or only a
         terrain's markers over the ground (fillers.ts). */
-    paintLayer: 'terrain' | 'fillers';
+    paintLayer: 'terrain' | 'fillers' | 'single';
+    /** 'single' (the Paint tool only): a click places ONE filler of this
+        terrain (slug) as a landmark — see fillerStamps.ts. */
+    singleFiller: string;
     /** The terrain code whose markers the filler brush lays down, or `_`
         to rub painted fillers out. */
     filler: string;
@@ -89,7 +92,7 @@ export interface MapUi {
     /** The eraser rubs out terrain, or removes whatever object it touches. */
     eraseMode: 'terrain' | 'objects';
     landmark: string;
-    /** For a single filler (`landmark` is `filler:<terrain>`): which marker. */
+    /** The marker of `singleFiller` a click places. */
     fillerVariant: number;
     pathKind: PathKind;
     /** The look of the next freehand sketch. */
@@ -143,7 +146,7 @@ export class MapStore {
             fog: { shape: 'circle', size: 4 },
             unfog: { shape: 'circle', size: 3 },
         },
-        paintLayer: 'terrain', filler: 'F', shape: 'rect', shapeFill: 'fill', shapeWidth: 1,
+        paintLayer: 'terrain', singleFiller: 'mountain', filler: 'F', shape: 'rect', shapeFill: 'fill', shapeWidth: 1,
         paintEdge: 'map', edgeKind: 'soft', eraseMode: 'terrain',
         smartPaint: false, lockedTerrains: [], stayOnStart: false,
         fogColor: 'dark', fogStrength: 100, fogHidden: false,

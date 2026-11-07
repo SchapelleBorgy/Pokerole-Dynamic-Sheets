@@ -179,6 +179,7 @@ zoom or grid setting ever moves anything.
 - **Single fillers** ([`src/map/fillerStamps.ts`](src/map/fillerStamps.ts)):
   one of a terrain's markers — a peak, a tree — as a landmark
   (`filler:<terrain>` plus a `variant`), placed, sized and turned on its own.
+  Placed from the Paint tool's "One filler" mode.
   Its art is the style's own marker redrawn at the size it is shown
   (`markerArt` in `render/patterns.ts`), so it stays sharp when enlarged.
 - **Sketches** ([`src/map/sketch.ts`](src/map/sketch.ts)): freehand lines
