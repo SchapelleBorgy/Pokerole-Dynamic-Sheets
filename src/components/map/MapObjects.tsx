@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { MapSprite } from './MapSprite';
-import { landmarkOf } from '../../map/landmarks';
+import { fillerTerrain, landmarkOf } from '../../map/landmarks';
+import { fillerUrl } from '../../map/fillerStamps';
 import { landmarkChain, markerChain, pokemonTokenChain } from '../../map/sprites';
 import { midpoint, polygonD, riverInkD, sampleCurve, smoothPathD, taperOutline } from '../../map/geometry';
 import type { Pt } from '../../map/geometry';
@@ -146,6 +147,10 @@ function StampView({ stamp, style, selected, alone, onDown }: {
 }) {
     const def = landmarkOf(stamp.landmark);
     const px = stamp.size * CELL;
+    /* A single filler draws the style's own marker; with none in this
+       style it falls back to the placeholder disc. */
+    const filler = fillerTerrain(stamp.landmark);
+    const fillerArt = filler ? fillerUrl(style, filler, stamp.variant ?? 0) : null;
     const sel = { kind: 'stamp' as const, id: stamp.id };
     const typeColor = stamp.type ? typeColors[stamp.type] : undefined;
     const lab = style.label.small;
@@ -159,14 +164,22 @@ function StampView({ stamp, style, selected, alone, onDown }: {
             }}
             onPointerDown={(e) => onDown(e, sel, 'move')}
         >
-            <MapSprite
-                candidates={landmarkChain(style, stamp.landmark)}
-                icon={def.icon}
-                color={def.color}
-                shape={style.marker}
-                className={'map-stamp-art' + (style.pixelated ? ' pixelated' : '')}
-                style={{ transform: stamp.flip ? 'scaleX(-1)' : undefined, fontSize: px * 0.45 }}
-            />
+            {filler && fillerArt ? (
+                <img
+                    src={fillerArt} alt="" draggable={false}
+                    className={'map-stamp-art map-filler-art' + (style.pixelated ? ' pixelated' : '')}
+                    style={{ transform: stamp.flip ? 'scaleX(-1)' : undefined }}
+                />
+            ) : (
+                <MapSprite
+                    candidates={filler ? [] : landmarkChain(style, stamp.landmark)}
+                    icon={def.icon}
+                    color={def.color}
+                    shape={style.marker}
+                    className={'map-stamp-art' + (style.pixelated ? ' pixelated' : '')}
+                    style={{ transform: stamp.flip ? 'scaleX(-1)' : undefined, fontSize: px * 0.45 }}
+                />
+            )}
             {typeColor && (
                 <span className="map-type-badge" style={{
                     background: tokenRing(style, typeColor), fontSize: px * 0.16,
@@ -315,10 +328,10 @@ export function LabelsLayer({ doc, style, selection, onDown }: {
 /** One sketch as the export draws it (map/sketch.ts): line and head in one
     stroke where the brush is solid, and the opacity on the group, so a
     translucent line never darkens where it overlaps itself. */
-export function SketchShape({ sketch }: { sketch: Pick<MapSketch, 'brush' | 'points' | 'color' | 'width' | 'opacity' | 'arrow'> }) {
+export function SketchShape({ sketch }: { sketch: Pick<MapSketch, 'brush' | 'points' | 'color' | 'width' | 'opacity' | 'arrow' | 'straight'> }) {
     const look = sketchLook(sketch, CELL);
     const pts = sketch.points as Pt[];
-    const line = sketchLineD(pts, CELL);
+    const line = sketchLineD(pts, CELL, sketch.straight);
     const head = sketch.arrow ? sketchArrowD(pts, sketch.width, CELL) : '';
     const joined = !!head && arrowInLine(sketch.brush);
     const common = {
@@ -340,7 +353,7 @@ export function SketchesLayer({ doc, selection, draft, onDown }: {
     return (
         <svg className="map-svg map-sketches" width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
             {doc.sketches.map((k) => {
-                const d = sketchLineD(k.points as Pt[], CELL);
+                const d = sketchLineD(k.points as Pt[], CELL, k.straight);
                 const selected = isSel(selection, 'sketch', k.id);
                 return (
                     <g key={k.id}>

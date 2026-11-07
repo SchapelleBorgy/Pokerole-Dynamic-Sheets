@@ -89,11 +89,16 @@ export interface MapUi {
     /** The eraser rubs out terrain, or removes whatever object it touches. */
     eraseMode: 'terrain' | 'objects';
     landmark: string;
+    /** For a single filler (`landmark` is `filler:<terrain>`): which marker. */
+    fillerVariant: number;
     pathKind: PathKind;
     /** The look of the next freehand sketch. */
     sketch: SketchSettings;
     /** The sketch tool rubs out whole sketches instead of drawing. */
     sketchErase: boolean;
+    /** The sketch tool draws the shape picked in `shape` instead of a
+        freehand line. */
+    sketchShape: boolean;
     /** The role a newly placed label takes. */
     labelRole: LabelRole;
     token: PendingToken | null;
@@ -142,7 +147,7 @@ export class MapStore {
         paintEdge: 'map', edgeKind: 'soft', eraseMode: 'terrain',
         smartPaint: false, lockedTerrains: [], stayOnStart: false,
         fogColor: 'dark', fogStrength: 100, fogHidden: false,
-        landmark: 'mountain', pathKind: 'road', labelRole: 'town', sketch: DEFAULT_SKETCH, sketchErase: false, token: null, selection: [],
+        landmark: 'mountain', fillerVariant: 0, pathKind: 'road', labelRole: 'town', sketch: DEFAULT_SKETCH, sketchErase: false, sketchShape: false, token: null, selection: [],
     };
 
     /** Change one brush's shape or size. */

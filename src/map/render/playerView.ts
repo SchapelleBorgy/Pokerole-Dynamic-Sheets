@@ -4,7 +4,7 @@ import type { ImageLoader } from './exportPng';
 import type { MapDoc } from '../types';
 import { isHidden } from '../../lib/tableLink';
 import type { MapObjectInfo, PlayerHide } from '../../lib/tableLink';
-import { LANDMARK_BY_SLUG } from '../landmarks';
+import { landmarkOf } from '../landmarks';
 
 /* The map as the players at the shared table see it.
 
@@ -82,7 +82,7 @@ export function mapObjects(doc: MapDoc): MapObjectInfo[] {
     const fog = fogOf(doc);
     const out: MapObjectInfo[] = [];
     for (const s of doc.stamps) {
-        const name = (s.label || '').trim() || LANDMARK_BY_SLUG.get(s.landmark)?.name || s.landmark;
+        const name = (s.label || '').trim() || landmarkOf(s.landmark).name;
         out.push({ id: s.id, kind: 'stamp', name, fogged: hiddenAt(doc, fog, s.x, s.y) });
     }
     for (const t of doc.tokens) {

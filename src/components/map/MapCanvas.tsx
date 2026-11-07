@@ -17,14 +17,14 @@ import { slotOf } from '../../map/store';
 import type { BrushSetting, MapUi } from '../../map/store';
 import { distToPolyline, simplify } from '../../map/geometry';
 import type { Pt } from '../../map/geometry';
-import { landmarkOf } from '../../map/landmarks';
+import { fillerTerrain, landmarkOf } from '../../map/landmarks';
 import { CELL } from '../../map/render/patterns';
 import { buildGeometry, drawEdgeTint, drawGrid, drawTerrain, geometryKey } from '../../map/render/terrain';
 import { onPictureArrived, pictureNow } from '../../map/picture';
 import type { TerrainGeometry } from '../../map/render/terrain';
 import { onImageArrived } from '../../map/sprites';
 import { LabelsLayer, PathsLayer, SketchesLayer, StampsLayer, TokensLayer } from './MapObjects';
-import { cleanSketchWidth, finishTrack } from '../../map/sketch';
+import { cleanSketchWidth, finishTrack, shapeTrack } from '../../map/sketch';
 import type { Grab, ObjectDown } from './MapObjects';
 import { useToast } from '../common/Toast';
 import type { MapDoc, MapSketch, Selection, Tool } from '../../map/types';
@@ -62,6 +62,9 @@ type Gesture =
        which decides how closely the track is kept. */
     | { kind: 'sketch'; pts: Pt[]; pxPerCell: number }
     | { kind: 'sketchErase' }
+    /* A shape drawn as a sketch: the same drag and Alt rule as the Shapes
+       tool, kept as a draft until the button is let go. */
+    | { kind: 'sketchShape'; start: Pt; end: Pt; even: boolean }
     | { kind: 'erase' }
     /* Everything selected moves together; `anchor` is the one under the
        pointer, the one whose snapping decides the step for all of them. */
@@ -390,16 +393,19 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             const g = gesture.current;
-            if (g?.kind !== 'shape') return;
+            if (g?.kind !== 'shape' && g?.kind !== 'sketchShape') return;
             if (e.key === 'Alt') {
                 e.preventDefault();
                 const even = e.type === 'keydown';
-                if (g.even !== even) { g.even = even; shapeSoon(g); }
+                if (g.even === even) return;
+                g.even = even;
+                if (g.kind === 'shape') shapeSoon(g); else sketchShapeDraft(g);
             } else if (e.key === 'Escape' && e.type === 'keydown') {
                 e.preventDefault();
                 e.stopPropagation();
-                if (g.frame != null) cancelAnimationFrame(g.frame);
                 gesture.current = null;
+                if (g.kind === 'sketchShape') { setSketchDraft(null); return; }
+                if (g.frame != null) cancelAnimationFrame(g.frame);
                 setShapeDraft(null);
                 store.cancel();
             }
@@ -408,6 +414,21 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         window.addEventListener('keyup', onKey, true);
         return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onKey, true); };
     });
+
+    /** The sketch a shape drag would leave, shown as the draft. */
+    const sketchShapeOf = (g: Extract<Gesture, { kind: 'sketchShape' }>): MapSketch | null => {
+        const ui = store.ui;
+        const geom = shapeGeometry(ui.shape, g.start, g.end, g.even);
+        if (!shapeHasSize(geom)) return null;
+        const d = store.doc;
+        return {
+            id: '', ...ui.sketch, straight: true,
+            points: shapeTrack(geom.pts, geom.closed, d.cols, d.rows),
+            /* An arrowhead belongs on a line, not round a shape. */
+            arrow: geom.closed ? false : ui.sketch.arrow,
+        };
+    };
+    const sketchShapeDraft = (g: Extract<Gesture, { kind: 'sketchShape' }>) => setSketchDraft(sketchShapeOf(g));
 
     const paintAlong = (g: Stroking, from: Pt, to: Pt) => {
         if (!strokeSegment(g.canvas, g.brush.shape, from, to, g.brush.size, g.stroke)) return;
@@ -455,8 +476,9 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         if (pointers.current.size > 2) return;
 
         const tool = store.ui.tool;
-        /* Alt-drag pans, except under Shapes, where Alt evens the shape out. */
-        if (e.button === 1 || tool === 'pan' || spaceHeld || (e.button === 0 && e.altKey && tool !== 'shape')) {
+        /* Alt-drag pans, except while drawing a shape, where Alt evens it out. */
+        const shaping = tool === 'shape' || (tool === 'sketch' && store.ui.sketchShape && !store.ui.sketchErase);
+        if (e.button === 1 || tool === 'pan' || spaceHeld || (e.button === 0 && e.altKey && !shaping)) {
             e.preventDefault();
             const v = viewRef.current;
             gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y };
@@ -533,14 +555,30 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                     return;
                 }
                 if (!inside(at)) return;
+                if (store.ui.sketchShape) {
+                    e.preventDefault();
+                    gesture.current = { kind: 'sketchShape', start: at, end: at, even: e.altKey };
+                    setSketchDraft(null);
+                    return;
+                }
                 gesture.current = { kind: 'sketch', pts: [at], pxPerCell: viewRef.current.zoom * CELL };
                 setSketchDraft({ id: '', ...store.ui.sketch, points: [[at[0], at[1]]] });
                 return;
             case 'stamp': {
                 if (!inside(at)) return;
                 const def = landmarkOf(store.ui.landmark);
-                const [x, y] = place(at, def.size);
                 const id = uid();
+                if (fillerTerrain(def.slug)) {
+                    /* A single filler goes exactly where it is clicked: it is
+                       placed by eye, not on the grid. */
+                    const variant = store.ui.fillerVariant;
+                    store.edit((d) => {
+                        d.stamps = [...d.stamps, { id, landmark: def.slug, variant, x: at[0], y: at[1], size: def.size, rotation: 0, flip: false, snap: false }];
+                    });
+                    store.setUi({ selection: [{ kind: 'stamp', id }] });
+                    return;
+                }
+                const [x, y] = place(at, def.size);
                 store.edit((d) => {
                     d.stamps = [...d.stamps, { id, landmark: def.slug, x, y, size: def.size, rotation: 0, flip: false }];
                 });
@@ -679,6 +717,11 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                 setSketchDraft((k) => (k ? { ...k, points: g.pts.map(([x, y]) => [x, y] as [number, number]) } : k));
                 return;
             }
+            case 'sketchShape':
+                g.end = at;
+                g.even = e.altKey;
+                sketchShapeDraft(g);
+                return;
             case 'sketchErase':
                 eraseSketchesAt(at);
                 return;
@@ -775,6 +818,16 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
             setBox(null);
             /* A press that never became a drag: an ordinary click on nothing. */
             if (!box && !g.add) store.setUi({ selection: [] });
+            return;
+        }
+        if (g.kind === 'sketchShape') {
+            setSketchDraft(null);
+            g.end = toCell(e);
+            if (e.type === 'pointerup') g.even = e.altKey;
+            const k = sketchShapeOf(g);
+            if (!k) return;
+            const id = uid();
+            store.edit((m) => { m.sketches = [...m.sketches, { ...k, id }]; });
             return;
         }
         if (g.kind === 'sketch') {

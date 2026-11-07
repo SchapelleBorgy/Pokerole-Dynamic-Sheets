@@ -67,6 +67,7 @@ export function normalizeSketch(raw: unknown): MapSketch | null {
         width,
         opacity,
         ...(r.arrow === true ? { arrow: true } : {}),
+        ...(r.straight === true ? { straight: true } : {}),
     };
 }
 
@@ -100,13 +101,31 @@ export function sketchLook(s: Pick<MapSketch, 'brush' | 'width' | 'opacity'>, ce
     }
 }
 
-/** The line, in world px. A single point is a dot. */
-export function sketchLineD(points: Pt[], cell: number): string {
+/** The line, in world px. A single point is a dot; a `straight` sketch
+    (a shape) runs point to point with its corners kept. */
+export function sketchLineD(points: Pt[], cell: number, straight = false): string {
     if (points.length === 1) {
         const [x, y] = points[0];
         return `M${(x * cell).toFixed(1)} ${(y * cell).toFixed(1)}l0.01 0`;
     }
+    if (straight) {
+        const f = (v: number) => (v * cell).toFixed(1);
+        const closed = points.length > 2 && points[0][0] === points[points.length - 1][0] && points[0][1] === points[points.length - 1][1];
+        const body = closed ? points.slice(0, -1) : points;
+        return body.map(([x, y], i) => (i ? 'L' : 'M') + f(x) + ' ' + f(y)).join('') + (closed ? 'Z' : '');
+    }
     return smoothPathD(points, cell);
+}
+
+/** A shape's outline as a sketch keeps its points: on the map, three
+    decimals a coordinate, a closed shape ending where it began. */
+export function shapeTrack(pts: Pt[], closed: boolean, cols: number, rows: number): [number, number][] {
+    const out = pts.map(([x, y]) => [
+        Math.round(Math.max(0, Math.min(cols, x)) * 1000) / 1000,
+        Math.round(Math.max(0, Math.min(rows, y)) * 1000) / 1000,
+    ] as [number, number]);
+    if (closed && out.length) out.push([out[0][0], out[0][1]]);
+    return out;
 }
 
 /** An open arrowhead at the end of the line: two strokes back from the tip,
@@ -147,7 +166,7 @@ export const arrowInLine = (brush: SketchBrush): boolean => brush === 'pen' || b
 export function drawSketch(ctx: CanvasRenderingContext2D, s: MapSketch, cell: number): void {
     const look = sketchLook(s, cell);
     const pts = s.points as Pt[];
-    const line = sketchLineD(pts, cell);
+    const line = sketchLineD(pts, cell, s.straight);
     const head = s.arrow ? sketchArrowD(pts, s.width, cell) : '';
     ctx.save();
     ctx.globalAlpha = look.opacity;

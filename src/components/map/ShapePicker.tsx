@@ -6,7 +6,10 @@ import type { ShapeKind } from '../../map/shapes';
 /* The Shapes tool's own controls: which shape, filled or outlined, how wide
    the outline is — and, each time a shape is picked, a small tip saying
    what holding Alt does to it. What the shape paints (terrain or fillers)
-   is the terrain panel below it, shared with the brush. */
+   is the terrain panel below it, shared with the brush.
+
+   The Sketch tool's Shape mode shows the same picker and tip (`sketch`),
+   without fill and width: a sketch has its own pen, colour and width. */
 
 function ShapeGlyph({ kind }: { kind: ShapeKind }) {
     const p = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinejoin: 'round' as const };
@@ -24,18 +27,18 @@ function ShapeGlyph({ kind }: { kind: ShapeKind }) {
 
 const clampWidth = (v: number) => Math.round(Math.max(MIN_SHAPE_WIDTH, Math.min(MAX_SHAPE_WIDTH, v)) * 100) / 100;
 
-export function ShapePicker() {
+export function ShapePicker({ sketch = false }: { sketch?: boolean }) {
     const { store, ui } = useMap();
     const def = SHAPE_BY_KIND.get(ui.shape) ?? SHAPES[0];
     const line = ui.shape === 'line';
-    const stroked = line || ui.shapeFill === 'outline';
+    const stroked = !sketch && (line || ui.shapeFill === 'outline');
     const [draft, setDraft] = useState<string | null>(null);
     /* The tip comes back each time a shape is picked, then may be closed. */
     const [tipFor, setTipFor] = useState<ShapeKind | null>(ui.shape);
     useEffect(() => { setTipFor(ui.shape); }, [ui.shape]);
     return (
-        <div className="map-shapes">
-            <h3>Shape</h3>
+        <div className={'map-shapes' + (sketch ? ' in-sketch' : '')}>
+            {!sketch && <h3>Shape</h3>}
             <div className="map-shape-grid" role="group" aria-label="Shape">
                 {SHAPES.map((s) => (
                     <button
@@ -60,7 +63,7 @@ export function ShapePicker() {
                     </button>
                 </div>
             )}
-            {!line && (
+            {!line && !sketch && (
                 <div className="map-segmented map-shape-fill" role="group" aria-label="Filled or outlined">
                     <button aria-pressed={ui.shapeFill === 'fill'} onClick={() => store.setUi({ shapeFill: 'fill' })}>
                         <i className="fa-solid fa-square"></i> Filled

@@ -1616,6 +1616,9 @@ export interface MarkerSprite {
     x: number; y: number; w: number; h: number;
     /** Summed-area table of its inked texels, (w + 1) x (h + 1). */
     ink: Int32Array;
+    /** Which `mark()` call of the painter drew it, counting from 0 — a
+        marker that left no ink has none, so this is not its list index. */
+    ordinal: number;
 }
 
 export interface PatternParts {
@@ -1657,7 +1660,7 @@ export function patternParts(name: string, ink: string): PatternParts | null {
     const [markC, mx] = tileCanvas(W);
     gx.translate(pad, pad);
     mx.translate(pad, pad);
-    let cur = gx, inMarker = false, groundInk = false;
+    let cur = gx, inMarker = false, groundInk = false, ordinal = -1;
     const sprites: MarkerSprite[] = [];
     const flush = () => {
         if (!inMarker) return;
@@ -1683,12 +1686,13 @@ export function patternParts(name: string, ink: string): PatternParts | null {
                 ink[(y + 1) * (w + 1) + x + 1] = ink[y * (w + 1) + x + 1] + row;
             }
         }
-        sprites.push({ canvas, x: x0 - pad, y: y0 - pad, w, h, ink });
+        sprites.push({ canvas, x: x0 - pad, y: y0 - pad, w, h, ink, ordinal });
     };
     const mark: Mark = (on = true) => {
         flush();
         const next = on ? mx : gx;
         if (on) {
+            ordinal++;
             mx.save(); mx.setTransform(1, 0, 0, 1, 0, 0); mx.clearRect(0, 0, W, W); mx.restore();
         }
         for (const k of STATE) (next as unknown as Record<string, unknown>)[k] = cur[k];
@@ -1730,4 +1734,55 @@ export function patternParts(name: string, ink: string): PatternParts | null {
     const out = { S, ground, markers, sprites };
     parts.set(key, out);
     return out;
+}
+
+/* ------------------------------------------------------------ one marker, big
+
+   A filler placed on its own (a landmark of the "Fillers" group) is ONE of a
+   terrain's markers, drawn as large as the GM likes. Scaling its tile sprite
+   up would blur it, so the painter runs again through a stand-in context
+   that sends only that marker's drawing to a canvas, scaled up as vector
+   drawing — everything else goes nowhere. The painter is deterministic, so
+   it draws the same marker. Pixel painters keep their sprite: their art is
+   meant to be scaled up blocky. */
+
+const bigSprites = new Map<string, HTMLCanvasElement | null>();
+
+export function markerArt(name: string, ink: string, index: number, target = 256): HTMLCanvasElement | null {
+    const parts = patternParts(name, ink);
+    const sprite = parts?.sprites[index];
+    if (!parts || !sprite) return null;
+    if (isPixelPattern(name)) return sprite.canvas;
+    const key = name + '|' + ink + '|' + index + '|' + target;
+    if (bigSprites.has(key)) return bigSprites.get(key)!;
+    const painter = SMOOTH[name];
+    const f = Math.max(1, Math.min(24, target / Math.max(sprite.w, sprite.h)));
+    const [canvas, cx] = tileCanvas(1);
+    canvas.width = Math.ceil(sprite.w * f) + 2;
+    canvas.height = Math.ceil(sprite.h * f) + 2;
+    cx.setTransform(f, 0, 0, f, 1 - sprite.x * f, 1 - sprite.y * f);
+    const [, nowhere] = tileCanvas(1);
+    let cur: CanvasRenderingContext2D = nowhere, ordinal = -1;
+    const mark: Mark = (on = true) => {
+        if (on) ordinal++;
+        const next = on && ordinal === sprite.ordinal ? cx : nowhere;
+        for (const k of STATE) (next as unknown as Record<string, unknown>)[k] = cur[k];
+        cur = next;
+    };
+    const stand = new Proxy({}, {
+        get(_, prop: string) {
+            const v = (cur as unknown as Record<string, unknown>)[prop];
+            if (typeof v !== 'function') return v;
+            return (...args: unknown[]) => (v as (...a: unknown[]) => unknown).apply(cur, args);
+        },
+        set(_, prop: string, v) {
+            (cur as unknown as Record<string, unknown>)[prop] = v;
+            return true;
+        },
+    }) as CanvasRenderingContext2D;
+    /* A line width set while drawing elsewhere must still scale: the
+       transform carries it, as it does every coordinate. */
+    painter(stand, parts.S, ink, rng(seedOf(name)), mark);
+    bigSprites.set(key, canvas);
+    return canvas;
 }

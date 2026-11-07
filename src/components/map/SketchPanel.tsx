@@ -1,3 +1,4 @@
+import { ShapePicker } from './ShapePicker';
 import { useMap } from '../../map/MapContext';
 import {
     MAX_SKETCH_WIDTH, MIN_SKETCH_WIDTH, SKETCH_BRUSHES, SKETCH_COLORS, arrowInLine, cleanSketchWidth,
@@ -104,6 +105,17 @@ export function SketchPalette() {
                     <i className="fa-solid fa-eraser"></i> Rub out
                 </button>
             </div>
+            {!ui.sketchErase && (
+                <div className="map-segmented map-sketch-mode" role="group" aria-label="Freehand or a shape">
+                    <button aria-pressed={!ui.sketchShape} onClick={() => store.setUi({ sketchShape: false })}>
+                        <i className="fa-solid fa-signature"></i> Freehand
+                    </button>
+                    <button aria-pressed={ui.sketchShape} data-sketch-shape="" onClick={() => store.setUi({ sketchShape: true })}>
+                        <i className="fa-solid fa-draw-polygon"></i> Shape
+                    </button>
+                </div>
+            )}
+            {!ui.sketchErase && ui.sketchShape && <ShapePicker sketch />}
             <SketchFields value={ui.sketch} onChange={(patch) => store.setUi({ sketch: { ...ui.sketch, ...patch }, sketchErase: false })} />
             <button className="map-sketch-clear" disabled={!doc.sketches.length} onClick={() => store.edit((d) => { d.sketches = []; })}>
                 <i className="fa-solid fa-broom"></i> Clear all sketches
@@ -111,7 +123,10 @@ export function SketchPalette() {
             <p className="map-hint">
                 {ui.sketchErase
                     ? 'Drag across sketches to rub them out, a whole line at a time. Only sketches: terrain and everything else stay.'
-                    : 'Draw freely over the map — circle a town, mark a route, scribble a note. Sketches sit over the labels and under the tokens, and the rolling table shows them. '
+                    : (ui.sketchShape
+                        ? 'Drag on the map to draw the shape as a sketch, in this pen, colour and width. Escape while dragging drops it. The arrowhead goes on lines only. '
+                        : 'Draw freely over the map — circle a town, mark a route, scribble a note. ')
+                        + 'Sketches sit over the labels and under the tokens, and the rolling table shows them. '
                         + 'Select one to restyle, move or delete it. ' + brushSizeHint()}
             </p>
         </section>

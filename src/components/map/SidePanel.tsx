@@ -4,7 +4,8 @@ import { useMap } from '../../map/MapContext';
 import { LABEL_ROLES, PATH_KINDS, styleOf } from '../../map/styles';
 import type { MapStyle } from '../../map/styles';
 import { TERRAINS, TERRAIN_BY_CODE } from '../../map/terrain';
-import { LANDMARK_GROUPS, LANDMARKS, landmarkOf } from '../../map/landmarks';
+import { FILLER_PREFIX, LANDMARK_GROUPS, LANDMARKS, fillerTerrain, landmarkOf } from '../../map/landmarks';
+import { fillerTerrains, fillerUrl, fillerVariants } from '../../map/fillerStamps';
 import type { LandmarkGroup } from '../../map/landmarks';
 import { landmarkChain, markerChain, onImageArrived, pokemonTokenChain, probeImage, terrainTextureUrl } from '../../map/sprites';
 import { TILE_CELLS, patternDataUrl, tileCells } from '../../map/render/patterns';
@@ -347,10 +348,10 @@ function FogPalette({ clear }: { clear: boolean }) {
 
 function LandmarkPalette({ style }: { style: MapStyle }) {
     const { store, ui } = useMap();
-    const [group, setGroup] = useState<LandmarkGroup | 'all'>('all');
+    const [group, setGroup] = useState<LandmarkGroup | 'all' | 'fillers'>(fillerTerrain(ui.landmark) ? 'fillers' : 'all');
     const [query, setQuery] = useState('');
     const q = query.trim().toLowerCase();
-    const list = LANDMARKS.filter((l) => (group === 'all' || l.group === group) && (!q || l.name.toLowerCase().includes(q)));
+    const list = group === 'fillers' ? [] : LANDMARKS.filter((l) => (group === 'all' || l.group === group) && (!q || l.name.toLowerCase().includes(q)));
     return (
         <section className="map-section">
             <h3>Landmarks</h3>
@@ -359,12 +360,17 @@ function LandmarkPalette({ style }: { style: MapStyle }) {
                 {LANDMARK_GROUPS.map((g) => (
                     <button key={g.key} className="map-chip" aria-pressed={group === g.key} onClick={() => setGroup(g.key)}>{g.label}</button>
                 ))}
+                <button className="map-chip" data-group="fillers" aria-pressed={group === 'fillers'} onClick={() => setGroup('fillers')}
+                    title="One peak, one tree, one tuft of a terrain, placed and sized on its own">
+                    Fillers
+                </button>
             </div>
             <input
-                type="text" className="map-search" placeholder="Search landmarks…" value={query}
+                type="text" className="map-search" placeholder={group === 'fillers' ? 'Search terrains…' : 'Search landmarks…'} value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
             />
-            <div className="map-tiles">
+            {group === 'fillers' && <SingleFillers style={style} query={q} />}
+            {group !== 'fillers' && <div className="map-tiles">
                 {list.map((l) => (
                     <button
                         key={l.slug}
@@ -381,9 +387,68 @@ function LandmarkPalette({ style }: { style: MapStyle }) {
                     </button>
                 ))}
                 {!list.length && <p className="map-hint">No landmark matches.</p>}
-            </div>
+            </div>}
             <p className="map-hint">Click the map to place. {panHint()}</p>
         </section>
+    );
+}
+
+/** A terrain's markers as single landmarks: pick the terrain, then which of
+    its markers. Placed where clicked, then moved, sized and turned like any
+    landmark. */
+function SingleFillers({ style, query }: { style: MapStyle; query: string }) {
+    const { store, ui } = useMap();
+    const terrains = fillerTerrains(style).filter((t) => !query || t.name.toLowerCase().includes(query));
+    const current = fillerTerrain(ui.landmark);
+    const pick = (slug: string) => {
+        const first = fillerVariants(style, slug)[0] ?? 0;
+        store.setUi({ landmark: FILLER_PREFIX + slug, fillerVariant: first, tool: 'stamp' });
+    };
+    return (
+        <>
+            <div className="map-tiles">
+                {terrains.map((t) => {
+                    const v = fillerVariants(style, t.slug)[0] ?? 0;
+                    const url = fillerUrl(style, t.slug, v);
+                    return (
+                        <button
+                            key={t.slug}
+                            className={'map-tile' + (current === t.slug ? ' on' : '')}
+                            data-filler={t.slug}
+                            aria-pressed={current === t.slug}
+                            title={t.name + ': place its fillers one at a time'}
+                            onClick={() => pick(t.slug)}
+                        >
+                            {url && <img src={url} alt="" className={'map-tile-art map-filler-art' + (style.pixelated ? ' pixelated' : '')} />}
+                            <span className="map-tile-name">{t.name}</span>
+                        </button>
+                    );
+                })}
+                {!terrains.length && <p className="map-hint">No terrain has fillers in this style.</p>}
+            </div>
+            {current && <FillerVariants style={style} terrain={current} value={ui.fillerVariant}
+                onPick={(v) => store.setUi({ fillerVariant: v, tool: 'stamp' })} />}
+        </>
+    );
+}
+
+/** Which of a terrain's markers: a row of them to click. */
+function FillerVariants({ style, terrain, value, onPick }: {
+    style: MapStyle; terrain: string; value: number; onPick: (v: number) => void;
+}) {
+    const variants = fillerVariants(style, terrain);
+    if (variants.length < 2) return null;
+    return (
+        <div className="map-field">
+            <span>Which one</span>
+            <div className="map-filler-variants" role="group" aria-label="Which filler">
+                {variants.map((v) => (
+                    <button key={v} className="map-filler-variant" data-variant={v} aria-pressed={value === v} onClick={() => onPick(v)}>
+                        <img src={fillerUrl(style, terrain, v) ?? ''} alt="" className={style.pixelated ? 'pixelated' : undefined} />
+                    </button>
+                ))}
+            </div>
+        </div>
     );
 }
 
@@ -741,9 +806,26 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
         const s = doc.stamps.find((o) => o.id === sel.id);
         if (!s) return null;
         const def = landmarkOf(s.landmark);
+        const filler = fillerTerrain(s.landmark);
+        const style = styleOf(doc.styleId);
         title = def.name;
         body = (
             <>
+                {filler ? (
+                    <>
+                        <label className="map-field">
+                            <span>Filler of</span>
+                            <select value={filler} onChange={(e) => {
+                                const slug = e.currentTarget.value;
+                                set({ landmark: FILLER_PREFIX + slug, variant: fillerVariants(style, slug)[0] ?? 0 });
+                            }}>
+                                {fillerTerrains(style).map((t) => <option key={t.slug} value={t.slug}>{t.name}</option>)}
+                                {!fillerTerrains(style).some((t) => t.slug === filler) && <option value={filler}>{def.name}</option>}
+                            </select>
+                        </label>
+                        <FillerVariants style={style} terrain={filler} value={s.variant ?? 0} onPick={(v) => set({ variant: v })} />
+                    </>
+                ) : (
                 <label className="map-field">
                     <span>Landmark</span>
                     <select value={s.landmark} onChange={(e) => set({ landmark: e.currentTarget.value })}>
@@ -754,6 +836,7 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
                         ))}
                     </select>
                 </label>
+                )}
                 <label className="map-field">
                     <span>Label</span>
                     <textarea

@@ -148,6 +148,7 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
                 size: num(s.size, 2), rotation: num(s.rotation, 0), flip: !!s.flip, snap: optBool(s.snap),
                 label: typeof s.label === 'string' ? s.label.replace(/\r\n?/g, '\n') : undefined,
                 labelShow: s.labelShow === 'hover' ? 'hover' as const : undefined,
+                variant: typeof s.variant === 'number' && isFinite(s.variant) ? Math.max(0, Math.round(s.variant)) : undefined,
             })),
         tokens: arr<MapToken>(r.tokens).filter((t) => t && typeof t.kind === 'string')
             .map((t) => ({

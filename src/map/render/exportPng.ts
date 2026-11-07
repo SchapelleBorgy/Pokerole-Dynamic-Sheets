@@ -1,6 +1,7 @@
 import { styleOf, tokenRing } from '../styles';
 import type { MapStyle } from '../styles';
-import { landmarkOf } from '../landmarks';
+import { fillerTerrain, landmarkOf } from '../landmarks';
+import { fillerCanvas } from '../fillerStamps';
 import { TERRAINS } from '../terrain';
 import { landmarkChain, markerChain, pokemonTokenChain, terrainTextureUrl } from '../sprites';
 import { midpoint, polygonD, riverInkD, sampleCurve, smoothPathD, taperOutline } from '../geometry';
@@ -214,7 +215,12 @@ function textAlongPath(ctx: CanvasRenderingContext2D, pts: Pt[], text: string, d
 async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapStyle, load: ImageLoader): Promise<boolean> {
     const def = landmarkOf(s.landmark);
     const px = s.size * CELL;
-    const art = await load(landmarkChain(style, s.landmark));
+    /* A single filler is the style's own marker, drawn here and now — at
+       the size it will be on the picture, so it stays sharp. */
+    const filler = fillerTerrain(s.landmark);
+    const drawn = filler ? fillerCanvas(style, filler, s.variant ?? 0, Math.min(2048, Math.ceil(px * 1.5))) : null;
+    const art = drawn ? { img: drawn.canvas, w: drawn.canvas.width, h: drawn.canvas.height }
+        : filler ? null : await load(landmarkChain(style, s.landmark));
     ctx.save();
     ctx.translate(s.x * CELL, s.y * CELL);
     ctx.rotate(s.rotation * Math.PI / 180);
@@ -291,7 +297,7 @@ async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapS
         lines.forEach((line, i) => ctx.fillText(line, 0, px / 2 + i * size * 1.1));
     }
     ctx.restore();
-    return !!art;
+    return !!art || !!filler;
 }
 
 /* ------------------------------------------------------------ labels */

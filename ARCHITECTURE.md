@@ -176,6 +176,11 @@ zoom or grid setting ever moves anything.
 - **Landmark labels** run over as many lines as typed, and can be set to
   show only while the pointer is over the landmark; a picture of the map (the
   PNG, the players' view) leaves those out.
+- **Single fillers** ([`src/map/fillerStamps.ts`](src/map/fillerStamps.ts)):
+  one of a terrain's markers — a peak, a tree — as a landmark
+  (`filler:<terrain>` plus a `variant`), placed, sized and turned on its own.
+  Its art is the style's own marker redrawn at the size it is shown
+  (`markerArt` in `render/patterns.ts`), so it stays sharp when enlarged.
 - **Sketches** ([`src/map/sketch.ts`](src/map/sketch.ts)): freehand lines
   over the map — pen, marker, dashed, dotted, any colour, an optional
   arrowhead — kept as point lists in cells (`MapDoc.sketches`), drawn over
@@ -183,7 +188,8 @@ zoom or grid setting ever moves anything.
   draw them from the same helpers; a sketch is one stroke, so a translucent
   marker never darkens where it crosses itself. They are objects like any
   other — selectable, movable, erasable — and the sketch tool has its own
-  "rub out" mode that removes whole lines.
+  "rub out" mode that removes whole lines, and a Shape mode that draws the
+  Shapes tool's shapes as sketches (`straight`: corners kept).
 - **The background** is a layer under the painting: a bare sample (stored as
   `_`) shows the map's `background` terrain, whatever it is at the time. The
   eraser paints bare samples, so rubbing out uncovers it, and swapping the

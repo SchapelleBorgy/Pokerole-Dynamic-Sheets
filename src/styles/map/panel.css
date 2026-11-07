@@ -493,6 +493,8 @@
 
 /* The Shapes tool */
 .map-shapes { margin-bottom: 0.9rem; }
+.map-shapes.in-sketch { margin: 0.6rem 0 0.7rem; }
+.map-sketch-mode { margin-top: 0.5rem; }
 .map-shape-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -517,17 +519,22 @@
 .map-shape-choice[aria-pressed="true"] svg { color: var(--accent); }
 
 /* The Alt tip: a small bubble under the shapes, pointing up at them, that
-   comes back each time a shape is picked. */
+   comes back each time a shape is picked. Its ground is OPAQUE (the faint
+   accent laid over the panel's own colour): with a see-through ground the
+   arrow, which overlaps the bubble's top edge, showed through as a darker
+   patch. The arrow is a square turned 45°, bordered on its two upper sides,
+   centred on the bubble's top border so its corners land on that line. */
 .map-shape-tip {
+    --tip-ground: linear-gradient(var(--accent-faint), var(--accent-faint)), var(--panel-solid);
     position: relative;
     display: flex;
     align-items: flex-start;
     gap: 0.45rem;
-    margin-top: 0.55rem;
+    margin-top: 0.7rem;
     padding: 0.4rem 1.6rem 0.4rem 0.5rem;
     border: 1px solid var(--accent);
     border-radius: 7px;
-    background: var(--accent-faint);
+    background: var(--tip-ground);
     font-size: 0.72rem;
     line-height: 1.35;
     animation: map-shape-tip-in 0.22s ease-out;
@@ -535,14 +542,18 @@
 .map-shape-tip::before {
     content: '';
     position: absolute;
-    top: -6px;
+    /* 10px box: its centre 0.5px above the padding edge, the middle of
+       the 1px top border. */
+    top: -5.5px;
     left: 1.1rem;
+    box-sizing: border-box;
     width: 10px;
     height: 10px;
     transform: rotate(45deg);
     border-left: 1px solid var(--accent);
     border-top: 1px solid var(--accent);
-    background: inherit;
+    border-top-left-radius: 2px;
+    background: var(--tip-ground);
 }
 .map-shape-tip kbd {
     flex: 0 0 auto;
@@ -570,3 +581,26 @@
 @media (prefers-reduced-motion: reduce) { .map-shape-tip { animation: none; } }
 .map-shape-fill { margin-top: 0.55rem; }
 .map-shape-width-field { width: 4.6rem; flex: 0 0 auto; font-size: 0.8rem; }
+
+/* Single fillers: their own markers as tiles, and a row to pick one by. */
+.map-filler-art { image-rendering: auto; }
+.map-filler-art.pixelated, .map-filler-variant img.pixelated { image-rendering: pixelated; }
+.map-filler-variants {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.25rem;
+}
+.map-filler-variant {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    padding: 3px;
+    min-width: 0;
+}
+.map-filler-variant img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.map-filler-variant[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-faint);
+    box-shadow: 0 0 6px var(--accent-glow);
+}

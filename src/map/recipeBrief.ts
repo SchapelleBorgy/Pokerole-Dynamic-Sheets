@@ -1,5 +1,5 @@
 import { TERRAINS, TERRAIN_BY_CODE, terrainOf } from './terrain';
-import { LANDMARKS, LANDMARK_GROUPS, landmarkOf } from './landmarks';
+import { LANDMARKS, LANDMARK_GROUPS, fillerTerrain, landmarkOf } from './landmarks';
 import { MAP_STYLES, PATH_KINDS, styleOf } from './styles';
 import { LABEL_FONTS, LABEL_WARPS } from './labelText';
 import { resolvedOf } from './raster';
@@ -390,7 +390,8 @@ function describeDoc(doc: MapDoc): string[] {
     const f = (x: number, y: number) => `[${n2(x)}, ${n2(y)}]`;
     if (doc.stamps.length) {
         out.push('', 'Landmarks already on it:');
-        for (const s of doc.stamps) out.push(`- ${landmarkOf(s.landmark).slug} at ${f(s.x, s.y)}, size ${n2(s.size)}${s.label ? `, named ${JSON.stringify(s.label)}` : ''}`);
+        /* A single filler has no name a recipe knows. */
+        for (const s of doc.stamps.filter((x) => !fillerTerrain(x.landmark))) out.push(`- ${landmarkOf(s.landmark).slug} at ${f(s.x, s.y)}, size ${n2(s.size)}${s.label ? `, named ${JSON.stringify(s.label)}` : ''}`);
     }
     if (doc.labels.length) {
         out.push('', 'Labels already on it:');

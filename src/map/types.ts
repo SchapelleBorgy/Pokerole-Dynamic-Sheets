@@ -38,6 +38,9 @@ export interface MapStamp {
         landmark (or it is selected), and a picture of the map — the PNG,
         the players' view at the table — leaves it out. Absent: always. */
     labelShow?: 'hover';
+    /** A single filler (`landmark` is `filler:<terrain>`): which of the
+        terrain's markers it is. See fillerStamps.ts. */
+    variant?: number;
     /** A Gym's type, drawn as a badge in its corner. */
     type?: string;
     /** Snap to the grid: true or false overrides the map's own setting,
@@ -80,6 +83,10 @@ export interface MapSketch {
     opacity: number;
     /** An arrowhead at the end. */
     arrow?: boolean;
+    /** Drawn with straight segments through its points, corners kept: a
+        shape from the Sketch tool's Shape mode (a closed one repeats its
+        first point at the end). Absent: a smooth freehand curve. */
+    straight?: boolean;
 }
 
 export type LabelRole = 'region' | 'town' | 'route' | 'small';
