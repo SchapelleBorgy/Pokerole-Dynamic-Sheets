@@ -6,6 +6,7 @@ import type { MapStyle, TerrainLook } from '../styles';
 import type { EdgeKind, MapDoc } from '../types';
 import { EMPTY, codeIndex, rasterOf, resolvedOf } from '../raster';
 import { edgeResolver, edgesOf } from '../edges';
+import { NO_FILLER, fillersOf } from '../fillers';
 import { probeImage, terrainTextureUrl } from '../sprites';
 import { CELL, patternParts, tileScale } from './patterns';
 import { drawMarkers, markerPlan } from './markers';
@@ -98,6 +99,10 @@ export interface TerrainGeometry {
     depth?: Map<string, DepthBands | null>;
     /** Which markers each terrain keeps, by style and terrain; see markers.ts. */
     marks?: Map<string, MarkerPlan>;
+    /** The painted fillers' areas and marker plans, for the fillers string
+        they were built from: the geometry's key leaves the fillers out, so a
+        filler stroke never rebuilds the terrain's shapes. */
+    fillers?: { src: string; areas: Map<number, Path2D>; plans: Map<string, MarkerPlan> };
     /** On a map with a picture under it: where anything is painted. The
         terrain is drawn only inside it, so bare ground shows the picture. */
     painted?: Path2D | null;
@@ -479,8 +484,64 @@ function drawMarks(ctx: CanvasRenderingContext2D, geo: TerrainGeometry, doc: Map
     if (!geo.marks) geo.marks = new Map();
     const key = style.id + '|' + t.slug;
     let plan = geo.marks.get(key);
-    if (!plan) geo.marks.set(key, plan = markerPlan(doc, TERRAINS.indexOf(t), parts, s, geo.blocky ? 0 : 1));
+    if (!plan) geo.marks.set(key, plan = markerPlan(resolvedOf(doc), TERRAINS.indexOf(t), parts, s, geo.blocky ? 0 : 1));
     drawMarkers(ctx, plan, parts.markers && pattern(parts.markers), area, rule);
+}
+
+/** Whether terrain `slug` has markers of its own in `style` — the peaks,
+    trees or flowers a filler lays down. Ground texture alone (sand, waves)
+    and the owner's own tiles have none. */
+export function hasFiller(style: MapStyle, slug: string, textures: TextureSource = probeTexture): boolean {
+    if (textures(style, slug)) return false;
+    const look = style.terrain[slug];
+    if (!look?.pattern) return false;
+    return !!patternParts(look.pattern, look.ink ?? '#0003')?.sprites.length;
+}
+
+/** The painted fillers: each filler terrain's markers, whole, wherever it
+    was painted — over the ground's own markers, never instead of them. */
+function drawFillers(ctx: CanvasRenderingContext2D, geo: TerrainGeometry, doc: MapDoc, style: MapStyle,
+    textures: TextureSource): void {
+    const data = fillersOf(doc);
+    if (!data) return;
+    let cache = geo.fillers;
+    if (!cache || cache.src !== doc.fillers) {
+        /* Each filler's samples as row runs of squares, world px. */
+        const w = doc.cols * doc.res, h = doc.rows * doc.res, sp = CELL / doc.res;
+        const areas = new Map<number, Path2D>();
+        for (let y = 0; y < h; y++) {
+            let x = 0;
+            while (x < w) {
+                const v = data[y * w + x];
+                const x0 = x;
+                while (x < w && data[y * w + x] === v) x++;
+                if (v === NO_FILLER || !TERRAINS[v]) continue;
+                let a = areas.get(v);
+                if (!a) areas.set(v, a = new Path2D());
+                a.rect(x0 * sp, y * sp, (x - x0) * sp, sp);
+            }
+        }
+        cache = geo.fillers = { src: doc.fillers, areas, plans: new Map() };
+    }
+    const grid = { w: doc.cols * doc.res, h: doc.rows * doc.res, res: doc.res, data };
+    for (const [v, area] of cache.areas) {
+        const t = TERRAINS[v];
+        if (textures(style, t.slug)) continue;
+        const look = style.terrain[t.slug];
+        if (!look?.pattern) continue;
+        const parts = patternParts(look.pattern, look.ink ?? '#0003');
+        if (!parts?.sprites.length) continue;
+        const s = tileScale(look.pattern);
+        const key = style.id + '|' + t.slug;
+        let plan = cache.plans.get(key);
+        if (!plan) cache.plans.set(key, plan = markerPlan(grid, v, parts, s, 0));
+        let markers: CanvasPattern | null = null;
+        if (parts.markers) {
+            markers = ctx.createPattern(parts.markers, 'repeat');
+            markers?.setTransform(new DOMMatrix([s, 0, 0, s, 0, 0]));
+        }
+        drawMarkers(ctx, plan, markers, area, 'nonzero');
+    }
 }
 
 function fillLayer(ctx: CanvasRenderingContext2D, geo: TerrainGeometry, doc: MapDoc, style: MapStyle, t: TerrainDef,
@@ -1213,6 +1274,7 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, geo: TerrainGeometry,
     if (geo.waterLayers >= geo.layers.length) drawDepth(ctx, geo, doc, style);
 
     drawSoft(ctx, geo, doc, style, textures);
+    drawFillers(ctx, geo, doc, style, textures);
 
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';

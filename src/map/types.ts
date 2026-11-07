@@ -187,6 +187,10 @@ export interface MapDoc {
     /** Fog of war over everything, run-length encoded on the terrain's
         samples; empty when there is none. See fog.ts. */
     fog: string;
+    /** Painted fillers: a terrain's markers (peaks, flowers, trees) laid
+        over the ground on top of its own, run-length encoded on the
+        terrain's samples; empty when none were painted. See fillers.ts. */
+    fillers: string;
     paths: MapPath[];
     stamps: MapStamp[];
     tokens: MapToken[];
@@ -203,4 +207,4 @@ export interface Selection {
     id: string;
 }
 
-export type Tool = 'select' | 'paint' | 'fill' | 'erase' | 'edge' | 'fog' | 'unfog' | 'path' | 'stamp' | 'token' | 'label' | 'sketch' | 'pan';
+export type Tool = 'select' | 'paint' | 'fill' | 'shape' | 'erase' | 'edge' | 'fog' | 'unfog' | 'path' | 'stamp' | 'token' | 'label' | 'sketch' | 'pan';

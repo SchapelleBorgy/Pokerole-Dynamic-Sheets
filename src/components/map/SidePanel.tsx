@@ -16,10 +16,11 @@ import { BrushControls } from './BrushControls';
 import { LabelTypeEditor } from './LabelTypeEditor';
 import { EDGE_KINDS, EDGE_NAME, paintValue } from '../../map/edges';
 import { FOG_COLORS, fogValue, fullFog } from '../../map/fog';
-import { EDGE_TINT } from '../../map/render/terrain';
+import { EDGE_TINT, hasFiller } from '../../map/render/terrain';
 import type { EdgeKind, MapDoc, MapLabel, MapPath, MapSketch, MapStamp, MapToken, Selection } from '../../map/types';
 import { riverInkD } from '../../map/geometry';
 import { SketchFields, SketchPalette } from './SketchPanel';
+import { ShapePicker } from './ShapePicker';
 import type { MapStore } from '../../map/store';
 import { brushSizeHint, panHint, useHotkeys } from '../../map/hotkeys';
 
@@ -49,9 +50,23 @@ function TerrainPalette({ style }: { style: MapStyle }) {
     const [, setTick] = useState(0);
     useEffect(() => onImageArrived(() => setTick((n) => n + 1)), []);
     const backgrounds = new Map(TERRAINS.map((t) => [t.slug, swatchBackground(style, t.slug)]));
+    const fillers = ui.tool !== 'fill' && ui.paintLayer === 'fillers';
+    const shape = ui.tool === 'shape';
     return (
         <section className="map-section">
-            <h3>Terrain</h3>
+            {shape && <ShapePicker />}
+            <h3>{fillers ? 'Fillers' : 'Terrain'}</h3>
+            {ui.tool !== 'fill' && (
+                <div className="map-segmented map-paint-layer" role="group" aria-label="What the brush paints">
+                    <button aria-pressed={!fillers} onClick={() => store.setUi({ paintLayer: 'terrain' })}>
+                        <i className="fa-solid fa-layer-group"></i> Terrain
+                    </button>
+                    <button aria-pressed={fillers} onClick={() => store.setUi({ paintLayer: 'fillers' })}>
+                        <i className="fa-solid fa-mountain-sun"></i> Fillers only
+                    </button>
+                </div>
+            )}
+            {fillers ? <FillerPalette style={style} backgrounds={backgrounds} /> : (<>
             <div className="map-swatches">
                 {TERRAINS.map((t) => (
                     <button
@@ -59,14 +74,14 @@ function TerrainPalette({ style }: { style: MapStyle }) {
                         className={'map-swatch' + (ui.terrain === t.code ? ' on' : '')}
                         aria-pressed={ui.terrain === t.code}
                         title={t.name}
-                        onClick={() => store.setUi({ terrain: t.code, tool: ui.tool === 'fill' ? 'fill' : 'paint' })}
+                        onClick={() => store.setUi({ terrain: t.code, tool: ui.tool === 'fill' || ui.tool === 'shape' ? ui.tool : 'paint' })}
                     >
                         <span className={'map-swatch-chip' + (style.pixelated ? ' pixelated' : '')} style={{ background: backgrounds.get(t.slug) }}></span>
                         <span className="map-swatch-name">{t.name}</span>
                     </button>
                 ))}
             </div>
-            {ui.tool !== 'fill' && <BrushControls slot="paint" />}
+            {ui.tool === 'paint' && <BrushControls slot="paint" />}
             {ui.tool !== 'fill' && <SmartPaint backgrounds={backgrounds} pixelated={!!style.pixelated} />}
             <EdgeChoice
                 label="Its edges"
@@ -77,9 +92,65 @@ function TerrainPalette({ style }: { style: MapStyle }) {
             <p className="map-hint">
                 {ui.tool === 'fill'
                     ? 'Click to fill the whole connected patch of the terrain under the pointer.'
-                    : 'Drag to paint. ' + brushSizeHint() + panHint()}
+                    : shape
+                        ? 'Drag on the map to draw the shape in this terrain. Escape while dragging drops it. ' + panHint()
+                        : 'Drag to paint. ' + brushSizeHint() + panHint()}
             </p>
+            </>)}
         </section>
+    );
+}
+
+/** The brush in filler mode: which terrain's markers it lays down — the
+    peaks, flowers or trees alone, over whatever ground is there and on top
+    of that ground's own — or rubbing painted ones out. Only the terrains
+    with markers in this style are offered. */
+function FillerPalette({ style, backgrounds }: { style: MapStyle; backgrounds: Map<string, string> }) {
+    const { store, ui, doc } = useMap();
+    const offered = TERRAINS.filter((t) => hasFiller(style, t.slug));
+    const current = TERRAIN_BY_CODE.get(ui.filler);
+    const missing = ui.filler !== '_' && !offered.some((t) => t.code === ui.filler);
+    return (
+        <>
+            <div className="map-swatches">
+                <button
+                    className={'map-swatch' + (ui.filler === '_' ? ' on' : '')}
+                    aria-pressed={ui.filler === '_'}
+                    title="Rub painted fillers out"
+                    onClick={() => store.setUi({ filler: '_' })}
+                >
+                    <span className="map-swatch-chip map-filler-none"><i className="fa-solid fa-eraser"></i></span>
+                    <span className="map-swatch-name">Rub out</span>
+                </button>
+                {offered.map((t) => (
+                    <button
+                        key={t.code}
+                        className={'map-swatch' + (ui.filler === t.code ? ' on' : '')}
+                        aria-pressed={ui.filler === t.code}
+                        title={t.name}
+                        onClick={() => store.setUi({ filler: t.code })}
+                    >
+                        <span className={'map-swatch-chip' + (style.pixelated ? ' pixelated' : '')} style={{ background: backgrounds.get(t.slug) }}></span>
+                        <span className="map-swatch-name">{t.name}</span>
+                    </button>
+                ))}
+            </div>
+            {ui.tool === 'paint' && <BrushControls slot="paint" />}
+            <SmartPaint backgrounds={backgrounds} pixelated={!!style.pixelated} />
+            <div className="map-fog-actions">
+                <button disabled={!doc.fillers} onClick={() => store.edit((d) => { d.fillers = ''; })}>
+                    <i className="fa-solid fa-broom"></i> Clear all fillers
+                </button>
+            </div>
+            <p className="map-hint">
+                {missing && current ? current.name + ' has nothing to lay down in this style: pick another. ' : ''}
+                {ui.filler === '_'
+                    ? 'Drag to rub out the fillers you painted. The terrain\'s own stay. '
+                    : 'Drag to add ' + (current?.name ?? 'a terrain') + '\'s fillers — its peaks, trees or flowers — over the ground, '
+                        + 'on top of the ones it already has. The ground keeps its colour. '}
+                {(ui.tool === 'paint' ? brushSizeHint() : '') + panHint()}
+            </p>
+        </>
     );
 }
 
@@ -176,7 +247,7 @@ function ErasePalette() {
                 <>
                     <BrushControls slot="erase" />
                     <p className="map-hint">
-                        Drag to rub terrain out: the map's background{bg ? ' (' + bg.name + ')' : ''} shows through.
+                        Drag to rub terrain out, painted fillers with it: the map's background{bg ? ' (' + bg.name + ')' : ''} shows through.
                         Change the background on the top bar. {brushSizeHint()}
                     </p>
                 </>
@@ -786,7 +857,7 @@ export function SidePanel() {
     const style = styleOf(doc.styleId);
     let palette: ReactElement | null = null;
     switch (ui.tool) {
-        case 'paint': case 'fill': palette = <TerrainPalette style={style} />; break;
+        case 'paint': case 'fill': case 'shape': palette = <TerrainPalette style={style} />; break;
         case 'stamp': palette = <LandmarkPalette style={style} />; break;
         case 'path': palette = <PathPalette style={style} />; break;
         case 'token': palette = <TokenPalette style={style} />; break;

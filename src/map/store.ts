@@ -1,6 +1,7 @@
 import { createDoc, normalizeDoc } from './doc';
 import type { BrushId } from './brushes';
 import type { FogColor } from './fog';
+import type { ShapeFill, ShapeKind } from './shapes';
 import { DEFAULT_SKETCH } from './sketch';
 import type { SketchSettings } from './sketch';
 import type { EdgeKind, LabelRole, MapDoc, PathKind, Selection, Tool } from './types';
@@ -55,6 +56,18 @@ export interface MapUi {
     /** Terrain code the brush and the bucket lay down. */
     terrain: string;
     brushes: Record<BrushSlot, BrushSetting>;
+    /** What the terrain brush lays down: whole terrain, or only a
+        terrain's markers over the ground (fillers.ts). */
+    paintLayer: 'terrain' | 'fillers';
+    /** The terrain code whose markers the filler brush lays down, or `_`
+        to rub painted fillers out. */
+    filler: string;
+    /** The Shapes tool: which shape, filled or outlined, and how wide its
+        outline (and a line) is, in cells. It paints what the brush would:
+        terrain or fillers, with the same smart painting. */
+    shape: ShapeKind;
+    shapeFill: ShapeFill;
+    shapeWidth: number;
     /** The border look the terrain brush and the bucket lay down with the
         terrain — 'map' leaves it to the terrain's and the map's settings. */
     paintEdge: EdgeKind | 'map';
@@ -125,6 +138,7 @@ export class MapStore {
             fog: { shape: 'circle', size: 4 },
             unfog: { shape: 'circle', size: 3 },
         },
+        paintLayer: 'terrain', filler: 'F', shape: 'rect', shapeFill: 'fill', shapeWidth: 1,
         paintEdge: 'map', edgeKind: 'soft', eraseMode: 'terrain',
         smartPaint: false, lockedTerrains: [], stayOnStart: false,
         fogColor: 'dark', fogStrength: 100, fogHidden: false,
@@ -412,7 +426,7 @@ export function findObject(doc: MapDoc, sel: Selection): { id: string } | undefi
 /* Cheap equality for the fields a drag can touch: every array and the terrain
    are replaced, never mutated, so identity is enough. */
 function sameDoc(a: MapDoc, b: MapDoc): boolean {
-    return a.terrain === b.terrain && a.edges === b.edges && a.fog === b.fog && a.stamps === b.stamps && a.tokens === b.tokens
+    return a.terrain === b.terrain && a.edges === b.edges && a.fog === b.fog && a.fillers === b.fillers && a.stamps === b.stamps && a.tokens === b.tokens
         && a.labels === b.labels && a.paths === b.paths && a.sketches === b.sketches && a.picture === b.picture;
 }
 

@@ -160,6 +160,19 @@ zoom or grid setting ever moves anything.
   terrain. [`render/fog.ts`](src/map/render/fog.ts) turns it into one
   blurred picture that the page lays over every object (`FogLayer` in
   `MapCanvas.tsx`) and the PNG export draws last.
+- **Painted fillers** ([`src/map/fillers.ts`](src/map/fillers.ts)): another
+  layer on the terrain's samples, `MapDoc.fillers`, holding which terrain's
+  markers (peaks, trees, flowers) go on top of the ground — a mountain range
+  with flowers on it. The Paint tool's "Fillers only" mode paints it; the
+  renderer draws only those markers, whole, over the ground's own
+  (`drawFillers` in `render/terrain.ts`), and the eraser rubs them out with the
+  terrain.
+- **Shapes** ([`src/map/shapes.ts`](src/map/shapes.ts)): a line, rectangle,
+  ellipse, triangle, diamond or hexagon dragged out corner to corner, filled
+  or outlined, painted into the terrain or the fillers in one step. Alt makes
+  it regular (a square, a circle, a line at 45° steps). The gesture repaints
+  from the map as it was at the press on every move; `ShapePicker.tsx` holds
+  its controls and the Alt tip.
 - **Sketches** ([`src/map/sketch.ts`](src/map/sketch.ts)): freehand lines
   over the map — pen, marker, dashed, dotted, any colour, an optional
   arrowhead — kept as point lists in cells (`MapDoc.sketches`), drawn over

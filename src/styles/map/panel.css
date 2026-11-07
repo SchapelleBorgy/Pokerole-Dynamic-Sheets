@@ -365,6 +365,12 @@
 
 /* The eraser's two modes, and the edge look a brush lays down. */
 .map-erase-mode { margin-bottom: 0.55rem; }
+.map-paint-layer { margin-bottom: 0.55rem; }
+/* The filler brush's "Rub out" chip: an eraser on a plain ground. */
+.map-swatch-chip.map-filler-none {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-faint); color: inherit; font-size: 0.75rem;
+}
 .map-edge-choice { margin-top: 0.55rem; }
 .map-edge-dot {
     display: inline-block;
@@ -484,3 +490,83 @@
 .map-color-custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; }
 .map-sketch-panel .map-check { margin-top: 0.5rem; }
 .map-sketch-clear { margin-top: 0.6rem; width: 100%; }
+
+/* The Shapes tool */
+.map-shapes { margin-bottom: 0.9rem; }
+.map-shape-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+}
+.map-shape-choice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.45rem 0.2rem 0.35rem;
+    font-size: 0.7rem;
+    line-height: 1.15;
+    min-width: 0;
+}
+.map-shape-choice svg { color: var(--text-secondary); }
+.map-shape-choice[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-faint);
+    box-shadow: 0 0 6px var(--accent-glow);
+}
+.map-shape-choice[aria-pressed="true"] svg { color: var(--accent); }
+
+/* The Alt tip: a small bubble under the shapes, pointing up at them, that
+   comes back each time a shape is picked. */
+.map-shape-tip {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+    padding: 0.4rem 1.6rem 0.4rem 0.5rem;
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    background: var(--accent-faint);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    animation: map-shape-tip-in 0.22s ease-out;
+}
+.map-shape-tip::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 1.1rem;
+    width: 10px;
+    height: 10px;
+    transform: rotate(45deg);
+    border-left: 1px solid var(--accent);
+    border-top: 1px solid var(--accent);
+    background: inherit;
+}
+.map-shape-tip kbd {
+    flex: 0 0 auto;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.68rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--accent);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+}
+.map-shape-tip-close {
+    position: absolute;
+    top: 0.2rem;
+    right: 0.2rem;
+    padding: 0.1rem 0.3rem;
+    border: 0;
+    background: none;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+@keyframes map-shape-tip-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .map-shape-tip { animation: none; } }
+.map-shape-fill { margin-top: 0.55rem; }
+.map-shape-width-field { width: 4.6rem; flex: 0 0 auto; font-size: 0.8rem; }

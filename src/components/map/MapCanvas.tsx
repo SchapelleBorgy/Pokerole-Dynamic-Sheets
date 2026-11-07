@@ -9,7 +9,10 @@ import { BRUSH_BY_ID, cleanSize, newStroke, strokeSegment } from '../../map/brus
 import type { Stroke } from '../../map/brushes';
 import { PAINT_INHERIT, blankEdges, edgesOf, encodeEdges, paintValue, rememberEdges } from '../../map/edges';
 import { FOG_CLEAR, blankFog, encodeFog, fogOf, fogValue, rememberFog } from '../../map/fog';
+import { NO_FILLER, blankFillers, encodeFillers, fillersOf, rememberFillers } from '../../map/fillers';
 import { fogImage } from '../../map/render/fog';
+import { paintShape, shapeGeometry, shapeHasSize } from '../../map/shapes';
+import type { ShapeGeometry } from '../../map/shapes';
 import { slotOf } from '../../map/store';
 import type { BrushSetting, MapUi } from '../../map/store';
 import { distToPolyline, simplify } from '../../map/geometry';
@@ -52,6 +55,9 @@ type Gesture =
        reports far more often than the screen redraws. */
     | ({ kind: 'paint' } & Stroking)
     | { kind: 'path'; pts: Pt[] }
+    /* A shape: redrawn from the map as it was at the press on every move,
+       so it can shrink back as well as grow. `even` is Alt held. */
+    | { kind: 'shape'; start: Pt; end: Pt; even: boolean; base: MapDoc; frame: number | null }
     /* A freehand sketch: the pointer's track, and the zoom it is drawn at,
        which decides how closely the track is kept. */
     | { kind: 'sketch'; pts: Pt[]; pxPerCell: number }
@@ -74,10 +80,11 @@ const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 interface Stroking {
     last: Pt;
     canvas: Canvas;
-    /** The copies being painted, whichever of the two this stroke writes. */
+    /** The copies being painted, whichever of them this stroke writes. */
     terrain: Uint8Array | null;
     edges: Uint8Array | null;
     fog: Uint8Array | null;
+    fillers: Uint8Array | null;
     brush: BrushSetting;
     stroke: Stroke;
     frame: number | null;
@@ -86,15 +93,22 @@ interface Stroking {
 /** The layers one press of a painting tool writes, as copies to paint into:
     terrain and its border look for the brush, bare ground and no border for
     the eraser, the border look alone for the Borders brush, and the fog
-    alone for the two fog brushes — which never touch the ground under it. */
-function strokeLayers(d: MapDoc, tool: Tool, ui: Pick<MapUi, 'terrain' | 'paintEdge' | 'edgeKind' | 'fogColor' | 'fogStrength'>):
-    { terrain: Uint8Array | null; edges: Uint8Array | null; fog: Uint8Array | null; canvas: Canvas } {
+    alone for the two fog brushes — which never touch the ground under it —
+    and the fillers alone for the brush in filler mode. The eraser rubs
+    painted fillers out with the terrain. */
+function strokeLayers(d: MapDoc, tool: Tool,
+    ui: Pick<MapUi, 'terrain' | 'paintEdge' | 'edgeKind' | 'fogColor' | 'fogStrength' | 'paintLayer' | 'filler'>):
+    { terrain: Uint8Array | null; edges: Uint8Array | null; fog: Uint8Array | null; fillers: Uint8Array | null; canvas: Canvas } {
     const r = rasterOf(d);
     const had = edgesOf(d);
     const edgeCopy = () => (had ? had.slice() : blankEdges(d));
     const layers: Canvas['layers'] = [];
     let terrain: Uint8Array | null = null, edges: Uint8Array | null = null, fog: Uint8Array | null = null;
-    if (tool === 'fog' || tool === 'unfog') {
+    let fillers: Uint8Array | null = null;
+    if (tool === 'paint' && ui.paintLayer === 'fillers') {
+        fillers = fillersOf(d)?.slice() ?? blankFillers(d);
+        layers.push({ data: fillers, value: codeIndex(ui.filler) });
+    } else if (tool === 'fog' || tool === 'unfog') {
         fog = fogOf(d)?.slice() ?? blankFog(d);
         layers.push({ data: fog, value: tool === 'fog' ? fogValue(ui.fogColor, ui.fogStrength) : FOG_CLEAR });
     } else if (tool === 'edge') {
@@ -111,8 +125,13 @@ function strokeLayers(d: MapDoc, tool: Tool, ui: Pick<MapUi, 'terrain' | 'paintE
             edges = edgeCopy();
             layers.push({ data: edges, value: edge });
         }
+        const filled = erase ? fillersOf(d) : null;
+        if (filled) {
+            fillers = filled.slice();
+            layers.push({ data: fillers, value: NO_FILLER });
+        }
     }
-    return { terrain, edges, fog, canvas: { w: r.w, h: r.h, res: r.res, layers } };
+    return { terrain, edges, fog, fillers, canvas: { w: r.w, h: r.h, res: r.res, layers } };
 }
 
 /** What a terrain stroke pressed at `at` may cover — see Canvas.guard.
@@ -198,6 +217,7 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
     const [hover, setHover] = useState<Pt | null>(null);
     const [draft, setDraft] = useState<Pt[] | null>(null);
     const [sketchDraft, setSketchDraft] = useState<MapSketch | null>(null);
+    const [shapeDraft, setShapeDraft] = useState<ShapeGeometry | null>(null);
     /* The drag box of a Select drag on empty ground, corners in cell units. */
     const [box, setBox] = useState<[Pt, Pt] | null>(null);
     const gesture = useRef<Gesture | null>(null);
@@ -327,16 +347,67 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
 
     const publish = (g: Stroking) => {
         if (g.frame != null) { cancelAnimationFrame(g.frame); g.frame = null; }
+        publishLayers(g);
+    };
+
+    /** Put painted copies of the layers on the map, as a live change. */
+    const publishLayers = (g: Pick<Stroking, 'terrain' | 'edges' | 'fog' | 'fillers'>) => {
         const terrain = g.terrain ? encode(g.terrain) : store.doc.terrain;
         const edges = g.edges ? encodeEdges(g.edges) : store.doc.edges;
         const fog = g.fog ? encodeFog(g.fog) : store.doc.fog;
-        if (terrain === store.doc.terrain && edges === store.doc.edges && fog === store.doc.fog) return;
+        const fillers = g.fillers ? encodeFillers(g.fillers) : store.doc.fillers;
+        if (terrain === store.doc.terrain && edges === store.doc.edges && fog === store.doc.fog
+            && fillers === store.doc.fillers) return;
         /* Copies for the cache: the stroke goes on painting into its own. */
         if (g.terrain && terrain !== store.doc.terrain) remember(terrain, g.terrain.slice());
         if (g.edges && edges !== store.doc.edges) rememberEdges(edges, g.edges.slice());
         if (g.fog && fog !== store.doc.fog) rememberFog(fog, g.fog.slice());
-        store.live((m) => { m.terrain = terrain; m.edges = edges; m.fog = fog; });
+        if (g.fillers && fillers !== store.doc.fillers) rememberFillers(fillers, g.fillers.slice());
+        store.live((m) => { m.terrain = terrain; m.edges = edges; m.fog = fog; m.fillers = fillers; });
     };
+
+    /* The shape as it stands: the layers copied from the map at the press,
+       the shape painted into them, published. */
+    const drawShape = (g: Extract<Gesture, { kind: 'shape' }>) => {
+        if (g.frame != null) { cancelAnimationFrame(g.frame); g.frame = null; }
+        const ui = store.ui;
+        const geom = shapeGeometry(ui.shape, g.start, g.end, g.even);
+        setShapeDraft(geom);
+        const layers = strokeLayers(g.base, 'paint', ui);
+        if (shapeHasSize(geom)) {
+            const guard = strokeGuard(g.base, ui, g.start);
+            if (guard) layers.canvas.guard = guard;
+            paintShape(layers.canvas, geom, ui.shape === 'line' ? 'outline' : ui.shapeFill, ui.shapeWidth);
+        }
+        publishLayers(layers);
+    };
+    const shapeSoon = (g: Extract<Gesture, { kind: 'shape' }>) => {
+        if (g.frame == null) g.frame = requestAnimationFrame(() => { g.frame = null; drawShape(g); });
+    };
+
+    /* Alt evens the shape out the moment it goes down or up, without
+       waiting for the pointer to move; Escape drops the shape. */
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            const g = gesture.current;
+            if (g?.kind !== 'shape') return;
+            if (e.key === 'Alt') {
+                e.preventDefault();
+                const even = e.type === 'keydown';
+                if (g.even !== even) { g.even = even; shapeSoon(g); }
+            } else if (e.key === 'Escape' && e.type === 'keydown') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (g.frame != null) cancelAnimationFrame(g.frame);
+                gesture.current = null;
+                setShapeDraft(null);
+                store.cancel();
+            }
+        };
+        window.addEventListener('keydown', onKey, true);
+        window.addEventListener('keyup', onKey, true);
+        return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onKey, true); };
+    });
 
     const paintAlong = (g: Stroking, from: Pt, to: Pt) => {
         if (!strokeSegment(g.canvas, g.brush.shape, from, to, g.brush.size, g.stroke)) return;
@@ -365,7 +436,8 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         /* Two fingers down mid-stroke: that was the start of a pinch, not a
            stroke, so whatever the first finger did is put back. */
         const was = gesture.current;
-        if (was?.kind === 'paint' && was.frame != null) cancelAnimationFrame(was.frame);
+        if ((was?.kind === 'paint' || was?.kind === 'shape') && was.frame != null) cancelAnimationFrame(was.frame);
+        setShapeDraft(null);
         if (was && was.kind !== 'pan' && was.kind !== 'pinch') store.cancel();
         setDraft(null);
         setSketchDraft(null);
@@ -383,7 +455,8 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         if (pointers.current.size > 2) return;
 
         const tool = store.ui.tool;
-        if (e.button === 1 || tool === 'pan' || spaceHeld || (e.button === 0 && e.altKey)) {
+        /* Alt-drag pans, except under Shapes, where Alt evens the shape out. */
+        if (e.button === 1 || tool === 'pan' || spaceHeld || (e.button === 0 && e.altKey && tool !== 'shape')) {
             e.preventDefault();
             const v = viewRef.current;
             gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y };
@@ -428,7 +501,7 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                 if (!inside(at)) return;
                 {
                     const d = store.doc;
-                    const { terrain, edges, canvas } = strokeLayers(d, 'paint', store.ui);
+                    const { terrain, edges, canvas } = strokeLayers(d, 'paint', { ...store.ui, paintLayer: 'terrain' });
                     const looks = resolvedOf(d).data;
                     if (floodFill(canvas, looks, Math.floor(at[0] * d.res), Math.floor(at[1] * d.res))) {
                         const t = encode(terrain!);
@@ -439,6 +512,15 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                     }
                 }
                 return;
+            case 'shape': {
+                if (!inside(at)) return;
+                e.preventDefault();
+                store.checkpoint();
+                const g: Extract<Gesture, { kind: 'shape' }> = { kind: 'shape', start: at, end: at, even: e.altKey, base: store.doc, frame: null };
+                gesture.current = g;
+                setShapeDraft(shapeGeometry(store.ui.shape, at, at, g.even));
+                return;
+            }
             case 'path':
                 gesture.current = { kind: 'path', pts: [at] };
                 setDraft([at]);
@@ -572,6 +654,11 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                 setView({ zoom, x: mid[0] - (g.mid[0] - g.view.x) * k, y: mid[1] - (g.mid[1] - g.view.y) * k });
                 return;
             }
+            case 'shape':
+                g.end = at;
+                g.even = e.altKey;
+                shapeSoon(g);
+                return;
             case 'paint':
                 setHover(at);
                 paintAlong(g, g.last, at);
@@ -712,6 +799,12 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
             return;
         }
         if (g.kind === 'paint') publish(g);
+        if (g.kind === 'shape') {
+            g.end = toCell(e);
+            if (e.type === 'pointerup') g.even = e.altKey;
+            drawShape(g);
+            setShapeDraft(null);
+        }
         if (g.kind !== 'pan') store.settle();
     };
 
@@ -757,6 +850,7 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                         }}
                     />
                 )}
+                {shapeDraft && <ShapeOutline geom={shapeDraft} zoom={view.zoom} />}
                 {showBrush && hover && (
                     <BrushOutline
                         at={hover}
@@ -800,6 +894,19 @@ function brushTool(tool: string, eraseMode: string): boolean {
    a circle, a square, a diamond, a hexagon, the whole cells the Grid-cells
    brush will take — or, for the noisy brushes, a dashed circle, since their
    edge is decided by the noise under it. The fill tool shows the sample. */
+/** The shape being dragged, outlined exactly where it lands. */
+function ShapeOutline({ geom, zoom }: { geom: ShapeGeometry; zoom: number }) {
+    const points = geom.pts.map(([x, y]) => x * CELL + ',' + y * CELL).join(' ');
+    const sw = 1.5 / zoom;
+    const Tag = geom.closed ? 'polygon' : 'polyline';
+    return (
+        <svg className="map-svg map-brush-outline map-shape-outline" style={{ overflow: 'visible' }} width={1} height={1}>
+            <Tag points={points} fill="none" stroke="#000a" strokeWidth={sw * 2.2} />
+            <Tag points={points} fill="none" stroke="#fff" strokeWidth={sw} strokeDasharray={`${5 / zoom} ${4 / zoom}`} />
+        </svg>
+    );
+}
+
 function BrushOutline({ at, shape, size, res, zoom }: {
     at: Pt; shape: string; size: number; res: number; zoom: number;
 }) {

@@ -6,6 +6,7 @@ import {
 import type { Raster } from './raster';
 import { DEFAULT_BORDERS, MAX_SOFT, MIN_SOFT, decodeEdges, edgesOf, encodeEdges, isEdgeKind, rememberEdges } from './edges';
 import { decodeFog, encodeFog, fogOf, rememberFog } from './fog';
+import { NO_FILLER, decodeFillers, encodeFillers, fillersOf, rememberFillers } from './fillers';
 import { normalizeSketch } from './sketch';
 import type {
     EdgeKind, LabelRole, MapBorders, MapDoc, MapLabel, MapPath, MapPicture, MapStamp, MapToken, StyleId,
@@ -48,6 +49,7 @@ export function createDoc(opts: {
         edges: '',
         borders: { ...DEFAULT_BORDERS, terrain: {} },
         fog: '',
+        fillers: '',
         paths: [],
         stamps: [],
         tokens: [],
@@ -113,6 +115,10 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
        no fog, or fog cut to fit. */
     let fog = str(r.fog, '');
     if (fog && runTotal(fog) !== cols * res * rows * res) fog = encodeFog(decodeFog(fog, cols * res * rows * res));
+    let fillers = str(r.fillers, '');
+    if (fillers && (!isEncoded(fillers) || runTotal(fillers) !== cols * res * rows * res)) {
+        fillers = encodeFillers(decodeFillers(fillers, cols * res * rows * res));
+    }
 
     const picture = normalizePicture(r.picture);
     const out: MapDoc = {
@@ -133,6 +139,7 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
         edges,
         borders: normalizeBorders(r.borders),
         fog,
+        fillers,
         paths: arr<MapPath>(r.paths).filter((p) => p && Array.isArray(p.points) && p.points.length >= 2)
             .map((p) => ({ ...p, id: p.id || uid(), width: num(p.width, 0.6) })),
         stamps: arr<MapStamp>(r.stamps).filter((s) => s && typeof s.landmark === 'string')
@@ -259,6 +266,14 @@ export function resizeDoc(doc: MapDoc, cols: number, rows: number): MapDoc {
         fog = encodeFog(moved.data);
         rememberFog(fog, moved.data);
     }
+    let fillers = '';
+    const filled = fillersOf(doc);
+    if (filled) {
+        const was: Raster = { w: doc.cols * doc.res, h: doc.rows * doc.res, res: doc.res, data: filled };
+        const moved = resizeRaster(was, cols, rows, NO_FILLER);
+        fillers = encodeFillers(moved.data);
+        rememberFillers(fillers, moved.data);
+    }
     const cx = (v: number) => Math.max(0, Math.min(cols, v));
     const cy = (v: number) => Math.max(0, Math.min(rows, v));
     return {
@@ -269,6 +284,7 @@ export function resizeDoc(doc: MapDoc, cols: number, rows: number): MapDoc {
         terrain,
         edges,
         fog,
+        fillers,
         stamps: doc.stamps.map((s) => ({ ...s, x: cx(s.x), y: cy(s.y) })),
         tokens: doc.tokens.map((t) => ({ ...t, x: cx(t.x), y: cy(t.y) })),
         labels: doc.labels.map((l) => ({ ...l, x: cx(l.x), y: cy(l.y) })),

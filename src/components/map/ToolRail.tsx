@@ -11,6 +11,7 @@ export const TOOLS: { tool: Tool; icon: string; name: string }[] = [
     { tool: 'pan', icon: 'fa-hand', name: 'Pan' },
     { tool: 'paint', icon: 'fa-paintbrush', name: 'Paint terrain' },
     { tool: 'fill', icon: 'fa-fill-drip', name: 'Fill an area' },
+    { tool: 'shape', icon: 'fa-draw-polygon', name: 'Shapes: paint exact lines, rectangles, circles and more' },
     { tool: 'path', icon: 'fa-route', name: 'Draw a path' },
     { tool: 'stamp', icon: 'fa-mountain-city', name: 'Place a landmark' },
     { tool: 'token', icon: 'fa-chess-pawn', name: 'Place a token' },
