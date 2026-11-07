@@ -42,6 +42,7 @@ const TERRAIN_USE: Record<string, string> = {
     'tall-grass': 'tall grass where wild Pokémon hide',
     'forest': 'temperate woods',
     'jungle': 'tropical rainforest',
+    'hills': 'rolling green uplands, downs and foothills: lower and gentler than mountains',
     'desert': 'sand desert and dunes',
     'badlands': 'dry rocky scrub, mesas, canyon country',
     'tundra': 'cold barren plains',

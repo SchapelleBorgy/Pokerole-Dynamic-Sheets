@@ -50,7 +50,7 @@ const SELF_TILING = new Set(['bricks', 'clouds', 'puffs', 'px-bricks', 'px-cloud
 const BIG_TILE = new Set(['tussocks', 'tall-tussocks', 'flowers', 'swamp', 'forest-line', 'forest-fill',
     'jungle-line', 'jungle-fill', 'shrubs', 'bare-trees', 'volcanoes', 'rocks', 'hatch-peaks', 'hatch-snow-peaks',
     'engr-forest', 'engr-jungle', 'engr-grass', 'engr-flowers', 'engr-dunes', 'engr-mesas', 'engr-tundra', 'engr-drifts',
-    'engr-volcanoes', 'engr-rocks', 'engr-swamp',
+    'engr-volcanoes', 'engr-rocks', 'engr-swamp', 'engr-hills',
     'px-flowers', 'px-swamp', 'px-forest', 'px-jungle', 'px-shrubs', 'px-bare-trees', 'px-volcanic', 'px-rocks']);
 
 /** How many cells a side of this pattern's tile covers. */
@@ -522,7 +522,59 @@ function engrVolcano(c: CanvasRenderingContext2D, S: number, ink: string, x: num
     }
 }
 
+/* Hills: low rounded domes, wider than tall, nearer ones over farther.
+   `fill` (Anime) paints them solid with a lit crown and a shaded flank;
+   otherwise (Hand-drawn) a pale wash, an ink outline and a few strokes of
+   shade down the right-hand slope. */
+function hills(c: CanvasRenderingContext2D, S: number, ink: string, r: Rng, mark: Mark, fill: boolean) {
+    for (const p of scatter(r, S, 4, S * 0.27)) {
+        mark();
+        const w = S * (0.12 + r() * 0.05), h = w * (0.5 + r() * 0.15);
+        const dome = () => {
+            c.beginPath();
+            c.moveTo(p.x - w, p.y);
+            c.bezierCurveTo(p.x - w * 0.62, p.y - h * 1.33, p.x + w * 0.62, p.y - h * 1.33, p.x + w, p.y);
+            c.closePath();
+        };
+        if (fill) {
+            dome(); c.fillStyle = shade(ink, 0.3); c.fill();
+            c.save(); dome(); c.clip();
+            c.fillStyle = shade(ink, -0.12);
+            c.beginPath(); c.ellipse(p.x + w * 0.55, p.y, w * 0.6, h * 1.1, 0, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#ffffff40';
+            c.beginPath(); c.ellipse(p.x - w * 0.3, p.y - h * 0.75, w * 0.35, h * 0.22, -0.2, 0, Math.PI * 2); c.fill();
+            c.restore();
+            c.strokeStyle = shade(ink, -0.3); line(c, S / 140);
+            dome(); c.stroke();
+        } else {
+            dome(); c.fillStyle = '#00000012'; c.fill();
+            c.strokeStyle = ink; line(c, S / 110);
+            c.beginPath();
+            c.moveTo(p.x - w, p.y);
+            c.bezierCurveTo(p.x - w * 0.62, p.y - h * 1.33, p.x + w * 0.62, p.y - h * 1.33, p.x + w, p.y);
+            c.stroke();
+            line(c, S / 200);
+            c.beginPath();
+            for (let k = 0; k < 3; k++) {
+                const t = 0.3 + k * 0.2, sx = p.x + w * t, sy = p.y - h * (0.85 - t * 0.7);
+                c.moveTo(sx, sy); c.lineTo(sx + w * 0.08, sy + h * 0.45);
+            }
+            c.stroke();
+        }
+    }
+}
+
 const SMOOTH: Record<string, Painter> = {
+    hills(c, S, ink, r, mark) { hills(c, S, ink, r, mark, false); },
+    'hills-fill'(c, S, ink, r, mark) { hills(c, S, ink, r, mark, true); },
+    'engr-hills'(c, S, ink, r, mark) {
+        /* Rolling downs: wide low mounds, lit on the left, hatched on the right. */
+        for (const p of scatter(r, S, Math.round(4 * area(S)), S * 0.18)) {
+            mark();
+            const w = S * (0.065 + r() * 0.03);
+            engrMound(c, S, ink, p.x, p.y, w, w * (0.48 + r() * 0.12), '#efe4c6ee');
+        }
+    },
     'hatch-peaks'(c, S, ink, r, mark) { hatchedRange(c, S, ink, r, mark, false); },
     'hatch-snow-peaks'(c, S, ink, r, mark) { hatchedRange(c, S, ink, r, mark, true); },
     'engr-forest'(c, S, ink, r, mark) {
@@ -1258,6 +1310,24 @@ function pxPine(c: CanvasRenderingContext2D, ox: number, oy: number, ink: string
 }
 
 const PIXEL: Record<string, Painter> = {
+    'px-hills'(c, S, ink, r, mark) {
+        /* Little grassy knolls, eleven texels wide: a lit top-left, a
+           shaded underside, a dark rim. */
+        const rows: [number, number][] = [[3, 5], [1, 9], [0, 11], [0, 11], [0, 11]];
+        for (const p of scatter(r, S, 3, S * 0.36)) {
+            mark();
+            const ox = p.x | 0, oy = p.y | 0;
+            c.fillStyle = shade(ink, -0.35);
+            rows.forEach(([x0, w], y) => { px(c, ox + x0, oy + y - 1, w, 1); });
+            px(c, ox - 1, oy + 1, 1, 4); px(c, ox + 11, oy + 1, 1, 4);
+            c.fillStyle = ink;
+            rows.forEach(([x0, w], y) => { if (y > 0) px(c, ox + x0 + (y === 1 ? 1 : 0), oy + y, w - (y === 1 ? 2 : 0), 1); });
+            c.fillStyle = shade(ink, 0.35);
+            px(c, ox + 3, oy + 1, 3, 1); px(c, ox + 2, oy + 2, 2, 1);
+            c.fillStyle = shade(ink, -0.18);
+            px(c, ox + 1, oy + 4, 9, 1); px(c, ox + 8, oy + 2, 2, 2);
+        }
+    },
     'px-waves'(c, S, ink, r) {
         c.fillStyle = ink;
         for (let i = 0; i < 6; i++) px(c, r() * S, r() * S, 3 + (r() * 3 | 0), 1);

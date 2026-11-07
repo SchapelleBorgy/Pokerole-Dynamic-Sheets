@@ -164,6 +164,7 @@ one would orphan both its picture and every stamp of it on every map.
 | Tall grass | `tall-grass.png` |
 | Forest | `forest.png` |
 | Jungle | `jungle.png` |
+| Hills | `hills.png` |
 | Desert | `desert.png` |
 | Badlands | `badlands.png` |
 | Tundra | `tundra.png` |
