@@ -146,6 +146,8 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
             .map((s) => ({
                 ...s, id: s.id || uid(), x: num(s.x, 0), y: num(s.y, 0),
                 size: num(s.size, 2), rotation: num(s.rotation, 0), flip: !!s.flip, snap: optBool(s.snap),
+                label: typeof s.label === 'string' ? s.label.replace(/\r\n?/g, '\n') : undefined,
+                labelShow: s.labelShow === 'hover' ? 'hover' as const : undefined,
             })),
         tokens: arr<MapToken>(r.tokens).filter((t) => t && typeof t.kind === 'string')
             .map((t) => ({

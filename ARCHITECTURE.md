@@ -173,6 +173,9 @@ zoom or grid setting ever moves anything.
   it regular (a square, a circle, a line at 45° steps). The gesture repaints
   from the map as it was at the press on every move; `ShapePicker.tsx` holds
   its controls and the Alt tip.
+- **Landmark labels** run over as many lines as typed, and can be set to
+  show only while the pointer is over the landmark; a picture of the map (the
+  PNG, the players' view) leaves those out.
 - **Sketches** ([`src/map/sketch.ts`](src/map/sketch.ts)): freehand lines
   over the map — pen, marker, dashed, dotted, any colour, an optional
   arrowhead — kept as point lists in cells (`MapDoc.sketches`), drawn over

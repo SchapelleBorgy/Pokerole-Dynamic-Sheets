@@ -274,7 +274,9 @@ async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapS
         ctx.stroke();
         glyph(ctx, TYPE_ICONS[s.type] || 'fa-circle', cx, cy, px * 0.16, style.token?.halo ?? '#fff');
     }
-    if (s.label) {
+    /* A label shown only on hover has no place in a picture. Several lines
+       are stacked as the page stacks them, 1.1 apart. */
+    if (s.label && s.labelShow !== 'hover') {
         const lab = style.label.small;
         const size = Math.max(10, lab.size * CELL * 1.1);
         ctx.font = `${lab.italic ? 'italic ' : ''}${lab.weight} ${size}px ${lab.font}`;
@@ -283,9 +285,10 @@ async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapS
         ctx.lineJoin = 'round';
         ctx.strokeStyle = lab.halo;
         ctx.lineWidth = size * 0.3;
-        ctx.strokeText(s.label, 0, px / 2);
+        const lines = s.label.split('\n');
+        lines.forEach((line, i) => ctx.strokeText(line, 0, px / 2 + i * size * 1.1));
         ctx.fillStyle = lab.color;
-        ctx.fillText(s.label, 0, px / 2);
+        lines.forEach((line, i) => ctx.fillText(line, 0, px / 2 + i * size * 1.1));
     }
     ctx.restore();
     return !!art;

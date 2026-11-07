@@ -151,7 +151,7 @@ function StampView({ stamp, style, selected, alone, onDown }: {
     const lab = style.label.small;
     return (
         <div
-            className={'map-obj map-stamp' + (selected ? ' selected' : '')}
+            className={'map-obj map-stamp' + (selected ? ' selected' : '') + (stamp.label && stamp.labelShow === 'hover' ? ' label-hover' : '')}
             data-obj={'stamp:' + stamp.id}
             style={{
                 left: stamp.x * CELL, top: stamp.y * CELL, width: px, height: px,

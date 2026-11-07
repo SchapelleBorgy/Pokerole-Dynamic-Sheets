@@ -127,10 +127,23 @@ img.pixelated { image-rendering: pixelated; }
     top: 100%;
     left: 50%;
     transform: translateX(-50%);
-    white-space: nowrap;
+    /* Its own line breaks and no others: it never wraps on its own. */
+    white-space: pre;
+    text-align: center;
     line-height: 1.1;
     pointer-events: none;
 }
+
+/* A label shown only on hover: there while the pointer is over the
+   landmark or it is selected, above the landmarks round it. */
+/* Hover has to reach it under every tool, not only Select and Erase; a
+   press on it still falls through to the stage, which paints as usual. */
+.map-stamp.label-hover { pointer-events: auto; }
+.map-stamp.label-hover .map-stamp-label { opacity: 0; transition: opacity 0.12s; }
+.map-stamp.label-hover:hover .map-stamp-label,
+.map-stamp.label-hover.selected .map-stamp-label { opacity: 1; }
+.map-stamp.label-hover:hover,
+.map-stamp.label-hover.selected { z-index: 3; }
 
 .map-stamp.selected,
 .map-token.selected {

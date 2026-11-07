@@ -756,8 +756,27 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
                 </label>
                 <label className="map-field">
                     <span>Label</span>
-                    <input type="text" value={s.label ?? ''} placeholder="Shown under it" onChange={(e) => set({ label: e.currentTarget.value })} />
+                    <textarea
+                        className="map-stamp-label-field"
+                        rows={Math.min(8, Math.max(2, (s.label ?? '').split('\n').length))}
+                        value={s.label ?? ''}
+                        placeholder={'Shown under it.\nEnter starts a new line.'}
+                        onChange={(e) => set({ label: e.currentTarget.value })}
+                    />
                 </label>
+                <div className="map-field">
+                    <span>Show the label</span>
+                    <div className="map-segmented map-label-show" role="group" aria-label="When the label shows">
+                        <button aria-pressed={s.labelShow !== 'hover'} onClick={() => set({ labelShow: undefined })}
+                            title="The label is always on the map, and in pictures of it">
+                            <i className="fa-solid fa-eye"></i> Always
+                        </button>
+                        <button aria-pressed={s.labelShow === 'hover'} onClick={() => set({ labelShow: 'hover' })}
+                            title="The label appears only while the pointer is over the landmark. Pictures of the map (PNG, the table) leave it out">
+                            <i className="fa-solid fa-arrow-pointer"></i> On hover
+                        </button>
+                    </div>
+                </div>
                 {def.typed && (
                     <label className="map-field">
                         <span>Type</span>

@@ -32,7 +32,12 @@ export interface MapStamp {
     /** Degrees. */
     rotation: number;
     flip: boolean;
+    /** Shown under it; may run over several lines. */
     label?: string;
+    /** 'hover': the label shows only while the pointer is over the
+        landmark (or it is selected), and a picture of the map — the PNG,
+        the players' view at the table — leaves it out. Absent: always. */
+    labelShow?: 'hover';
     /** A Gym's type, drawn as a badge in its corner. */
     type?: string;
     /** Snap to the grid: true or false overrides the map's own setting,
