@@ -1,4 +1,5 @@
 import { ShapePicker } from './ShapePicker';
+import { ColorField } from './ColorField';
 import { useMap } from '../../map/MapContext';
 import {
     MAX_SKETCH_WIDTH, MIN_SKETCH_WIDTH, SKETCH_BRUSHES, SKETCH_COLORS, arrowInLine, cleanSketchWidth,
@@ -62,11 +63,13 @@ export function SketchFields({ value, onChange }: { value: SketchSettings; onCha
                     <button key={c} className="map-color" aria-pressed={value.color.toLowerCase() === c} style={{ background: c }}
                         aria-label={'Colour ' + c} onClick={() => onChange({ color: c })}></button>
                 ))}
-                <label className={'map-color map-color-custom' + (custom ? ' on' : '')} title="Any colour">
-                    <input type="color" value={value.color.length === 7 ? value.color : '#000000'}
-                        onChange={(e) => onChange({ color: e.currentTarget.value })} />
+                <ColorField
+                    value={value.color.length === 7 ? value.color : '#000000'} label="Any colour"
+                    className={'map-color map-color-custom' + (custom ? ' on' : '')}
+                    onChange={(hex) => onChange({ color: hex })}
+                >
                     <i className="fa-solid fa-eye-dropper" aria-hidden="true"></i>
-                </label>
+                </ColorField>
             </div>
             <label className="map-row">
                 <span>Width</span>

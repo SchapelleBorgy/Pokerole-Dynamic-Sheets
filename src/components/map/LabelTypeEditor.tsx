@@ -1,4 +1,5 @@
 import { useMap } from '../../map/MapContext';
+import { ColorField } from './ColorField';
 import { styleOf } from '../../map/styles';
 import { LABEL_FONTS, LABEL_WARPS, LABEL_WEIGHTS, labelType } from '../../map/labelText';
 import { CELL } from '../../map/render/patterns';
@@ -113,14 +114,14 @@ export function LabelTypeEditor({ label, set }: { label: MapLabel; set: (patch: 
                 <Num label="Leading" suffix="em" value={t.lineHeight} step={0.05} min={0.5} max={4} onChange={(v) => set({ lineHeight: v })} />
             </div>
             <div className="map-field-row">
-                <label className="map-field map-color-field">
+                <div className="map-field map-color-field">
                     <span>Colour</span>
-                    <input type="color" value={hex6(t.color)} onChange={(e) => set({ color: e.currentTarget.value })} />
-                </label>
-                <label className="map-field map-color-field">
+                    <ColorField value={hex6(t.color)} label="Label colour" className="wide" onChange={(hex) => set({ color: hex })} />
+                </div>
+                <div className="map-field map-color-field">
                     <span>Outline</span>
-                    <input type="color" value={hex6(t.halo)} onChange={(e) => set({ halo: e.currentTarget.value })} />
-                </label>
+                    <ColorField value={hex6(t.halo)} label="Outline colour" className="wide" onChange={(hex) => set({ halo: hex })} />
+                </div>
                 <Num label="Thickness" value={label.haloWidth ?? 0.2} step={0.02} min={0} max={1} onChange={(v) => set({ haloWidth: v })} />
                 <Num label="Opacity" suffix="%" value={Math.round(t.opacity * 100)} step={5} min={5} max={100} onChange={(v) => set({ opacity: v / 100 })} />
             </div>

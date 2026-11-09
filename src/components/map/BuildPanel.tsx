@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMap } from '../../map/MapContext';
 import { ITEMS, groupsFor, itemOf } from '../../map/world/catalog';
 import type { ItemGroup } from '../../map/world/catalog';
+import { ColorField } from './ColorField';
 import { clashes, colorsOf, itemThumb, variantOf } from '../../map/world/placed';
 import { panHint } from '../../map/hotkeys';
 import type { MapDoc, MapPlaced, MapRoom } from '../../map/types';
@@ -169,17 +170,17 @@ export function PlacedFields({ doc, p, set }: {
                 <span>Colours</span>
                 <div className="map-placed-colors">
                     {def.colors.map((slot, i) => !skip.includes(i) && (
-                        <label key={slot.name} className="map-placed-color" title={slot.name}>
-                            <input
-                                type="color" value={colors[i]}
-                                onChange={(e) => {
+                        <span key={slot.name} className="map-placed-color">
+                            <ColorField
+                                value={colors[i]} label={slot.name + ' colour'} data-color-slot={i}
+                                onChange={(hex) => {
                                     const next = def.colors.map((_, k) => p.colors?.[k] || '');
-                                    next[i] = e.currentTarget.value;
+                                    next[i] = hex;
                                     set({ colors: next });
                                 }}
                             />
                             <span>{slot.name}</span>
-                        </label>
+                        </span>
                     ))}
                     {custom && (
                         <button className="map-chip" onClick={() => set({ colors: undefined })} title="Back to the catalogue's colours">
@@ -264,7 +265,7 @@ export function RoomPanel() {
                     }}>
                         {FLOORS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                     </select>
-                    <input type="color" value={room.floorColor} title="Floor colour" onChange={(e) => set({ floorColor: e.currentTarget.value }, 'room-floor-color')} />
+                    <ColorField value={room.floorColor} label="Floor colour" data-room-floor-color="" onChange={(hex) => set({ floorColor: hex }, 'room-floor-color')} />
                 </div>
             </label>
             <label className="map-field">
@@ -276,13 +277,13 @@ export function RoomPanel() {
                     }}>
                         {WALLS.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                     </select>
-                    <input type="color" value={room.wallColor} title="Wall colour" onChange={(e) => set({ wallColor: e.currentTarget.value }, 'room-wall-color')} />
+                    <ColorField value={room.wallColor} label="Wall colour" data-room-wall-color="" onChange={(hex) => set({ wallColor: hex }, 'room-wall-color')} />
                 </div>
             </label>
-            <label className="map-field">
+            <div className="map-field">
                 <span>Wall tops and skirting</span>
-                <input type="color" value={room.trim} onChange={(e) => set({ trim: e.currentTarget.value }, 'room-trim')} />
-            </label>
+                <ColorField value={room.trim} label="Wall tops and skirting colour" className="wide" data-room-trim="" onChange={(hex) => set({ trim: hex }, 'room-trim')} />
+            </div>
             <button className="map-chip" data-room-remove="" onClick={() => store.edit((d) => { delete d.room; })}>
                 <i className="fa-solid fa-trash-can"></i> Remove the walls
             </button>

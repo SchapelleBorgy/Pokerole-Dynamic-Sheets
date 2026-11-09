@@ -172,6 +172,57 @@
 .map-popover-go:disabled { opacity: 0.45; cursor: default; }
 
 .map-export-pop { width: 21rem; }
+
+/* The colour picker (ColorField.tsx), in a popover held inside the window. */
+.map-colorpick-pop { min-width: 0; width: 15.5rem; padding: 0.65rem; }
+.map-colorpick { display: flex; flex-direction: column; gap: 0.55rem; }
+.map-colorpick-sv {
+    position: relative;
+    height: 9rem;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px #0006;
+    cursor: crosshair;
+    touch-action: none;
+}
+.map-colorpick-dot, .map-colorpick-knob {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px #000a, 0 1px 3px #0008;
+    pointer-events: none;
+}
+.map-colorpick-hue {
+    position: relative;
+    height: 0.85rem;
+    border-radius: 999px;
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+    box-shadow: inset 0 0 0 1px #0006;
+    cursor: pointer;
+    touch-action: none;
+}
+.map-colorpick-knob { top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+.map-colorpick-sv:focus-visible, .map-colorpick-hue:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.map-colorpick-row { display: flex; align-items: center; gap: 0.4rem; }
+.map-colorpick-now { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; border-radius: 6px; box-shadow: inset 0 0 0 1px #0006; }
+.map-colorpick-hex {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--panel-solid);
+    color: var(--text-primary);
+    font: inherit;
+    font-family: ui-monospace, monospace;
+}
+.map-colorpick-hex:focus { outline: none; border-color: var(--accent); }
+.map-colorpick-dropper { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; }
+.map-colorpick-presets { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0.3rem; }
+.map-colorpick-preset { aspect-ratio: 1; padding: 0; border: 1px solid #0006; border-radius: 5px; cursor: pointer; }
+.map-colorpick-preset[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .map-export-folder { margin: 0.3rem 0 0.2rem; }
 .map-export-folder button { margin-top: 0.4rem; }
 .map-warn { color: #fca5a5; opacity: 1; }
