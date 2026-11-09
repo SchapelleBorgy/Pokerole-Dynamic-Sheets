@@ -1,10 +1,15 @@
 import { createDoc, normalizeDoc } from './doc';
+import { createChild, doorOf, linkedDoc } from './world';
+import { groupsFor, itemOf } from './world/catalog';
+
+/** Whether a map of this kind offers this catalogue item. */
+const offers = (kind: MapDoc['kind'], item: string) => groupsFor(kind).some((g) => g.key === itemOf(item).group);
 import type { BrushId } from './brushes';
 import type { FogColor } from './fog';
 import type { ShapeFill, ShapeKind } from './shapes';
 import { DEFAULT_SKETCH } from './sketch';
 import type { SketchSettings } from './sketch';
-import type { EdgeKind, LabelRole, MapDoc, PathKind, Selection, Tool } from './types';
+import type { DocKind, EdgeKind, LabelRole, MapDoc, PathKind, Selection, Tool } from './types';
 
 /* One mutable store behind the Map Maker, in the same shape as the GM screen's
    (src/gm/store.ts): components read through useSyncExternalStore and every
@@ -92,6 +97,15 @@ export interface MapUi {
     /** The eraser rubs out terrain, or removes whatever object it touches. */
     eraseMode: 'terrain' | 'objects';
     landmark: string;
+    /** The Build tool (cities and interiors): which catalogue item a click
+        places, quarter-turned or mirrored. */
+    buildItem: string;
+    buildRot: 1 | undefined;
+    /** The variant of the item to build (catalog.ts `variants`). */
+    buildVariant: number;
+    /** The palette's filter: one kind of town's buildings, or all. */
+    buildEra: 'all' | 'modern' | 'medieval';
+    buildFlip: boolean;
     /** The marker of `singleFiller` a click places. */
     fillerVariant: number;
     pathKind: PathKind;
@@ -136,6 +150,9 @@ export class MapStore {
     private lastEdit: { key: string; at: number } | null = null;
     /** The state a drag started from, while one is in progress. */
     private pending: MapDoc | null = null;
+    /** Each map's undo history while another map is open: going into a
+        city and back out must not lose the world map's. */
+    private histories = new Map<string, { undo: MapDoc[]; redo: MapDoc[] }>();
 
     ui: MapUi = {
         tool: 'paint', terrain: 'g',
@@ -150,7 +167,7 @@ export class MapStore {
         paintEdge: 'map', edgeKind: 'soft', eraseMode: 'terrain',
         smartPaint: false, lockedTerrains: [], stayOnStart: false,
         fogColor: 'dark', fogStrength: 100, fogHidden: false,
-        landmark: 'mountain', fillerVariant: 0, pathKind: 'road', labelRole: 'town', sketch: DEFAULT_SKETCH, sketchErase: false, sketchShape: false, token: null, selection: [],
+        landmark: 'mountain', buildItem: 'house', buildRot: undefined, buildVariant: 0, buildEra: 'all', buildFlip: false, fillerVariant: 0, pathKind: 'road', labelRole: 'town', sketch: DEFAULT_SKETCH, sketchErase: false, sketchShape: false, token: null, selection: [],
     };
 
     /** Change one brush's shape or size. */
@@ -295,12 +312,23 @@ export class MapStore {
 
     /* ---------------------------------------------------------------- maps */
 
-    switchTo(id: string): void {
+    switchTo(id: string, select: Selection[] = []): void {
         if (!this.maps.some((m) => m.id === id) || id === this.activeId) return;
+        if (this.pending) this.settle();
+        this.histories.set(this.activeId, { undo: this.undoStack, redo: this.redoStack });
         this.activeId = id;
-        this.undoStack = [];
-        this.redoStack = [];
-        this.ui = { ...this.ui, selection: [] };
+        const kept = this.histories.get(id);
+        this.histories.delete(id);
+        this.undoStack = kept?.undo ?? [];
+        this.redoStack = kept?.redo ?? [];
+        this.lastEdit = null;
+        this.ui = {
+            ...this.ui, selection: select.filter((sel) => findObject(this.doc, sel)),
+            /* A world map has nothing to build with. */
+            tool: (this.ui.tool === 'build' && this.doc.kind === 'world') || (this.ui.tool === 'room' && this.doc.kind !== 'interior') ? 'select' : this.ui.tool,
+            /* The thing picked to build must be one this kind of map offers. */
+            buildItem: offers(this.doc.kind, this.ui.buildItem) ? this.ui.buildItem : this.doc.kind === 'interior' ? 'bed' : 'house',
+        };
         this.indexDirty = true;
         this.save();
         this.notify();
@@ -315,11 +343,88 @@ export class MapStore {
         this.notify();
     }
 
+    /* ------------------------------------------------------- the World Builder */
+
+    /** Open what a landmark or building on this map links to. False if it
+        links to nothing. */
+    enter(stampId: string): boolean {
+        const door = doorOf(this.doc, stampId);
+        const target = door && linkedDoc(this.maps, door);
+        if (!target) return false;
+        this.switchTo(target.id);
+        return true;
+    }
+
+    /** A new city or interior behind a landmark on this map, linked both
+        ways, and opened. The link is an ordinary edit of this map: undo here
+        takes it off again (the new map stays in the list). */
+    createInside(stampId: string, kind: DocKind): void {
+        const door = doorOf(this.doc, stampId);
+        if (!door) return;
+        const child = createChild(this.doc, door, kind);
+        this.linkTo(stampId, child.id);
+        this.maps = [...this.maps, child];
+        this.dirty.add(child.id);
+        this.indexDirty = true;
+        this.switchTo(child.id);
+        this.save();
+        this.notify();
+    }
+
+    /** Point a landmark on this map at an existing map (or at nothing), and
+        make that map's way out lead back here. */
+    linkTo(stampId: string, target: string | null): void {
+        const stamp = doorOf(this.doc, stampId);
+        if (!stamp) return;
+        const here = this.doc.id;
+        /* The map it opened until now no longer leads back here. */
+        const was = stamp.link && stamp.link !== target ? this.maps.find((m) => m.id === stamp.link) : undefined;
+        if (was?.parent && was.parent.doc === here && was.parent.object === stampId) {
+            this.maps = this.maps.map((m) => (m.id === was.id ? { ...m, parent: undefined } : m));
+            this.dirty.add(was.id);
+        }
+        /* One landmark or building per map opens it: the way out goes to one place. */
+        const relink = <T extends { id: string; link?: string }>(o: T): T => {
+            if (o.id === stampId) return target ? { ...o, link: target } : { ...o, link: undefined };
+            return target && o.link === target ? { ...o, link: undefined } : o;
+        };
+        this.edit((d) => {
+            d.stamps = d.stamps.map(relink);
+            d.placed = d.placed.map(relink);
+        });
+        if (target) {
+            const parent = { doc: here, object: stampId };
+            this.maps = this.maps.map((m) => (m.id === target ? { ...m, parent } : m));
+            /* Its own undo must not take the way out away again. */
+            const h = this.histories.get(target);
+            if (h) this.histories.set(target, { undo: h.undo.map((m) => ({ ...m, parent })), redo: h.redo.map((m) => ({ ...m, parent })) });
+            this.dirty.add(target);
+            this.save();
+            this.notify();
+        }
+    }
+
+    /** Back out to the map this one is entered from, with the landmark that
+        opens it selected. False at the top. */
+    goUp(): boolean {
+        const p = this.doc.parent;
+        const up = p && this.maps.find((m) => m.id === p.doc);
+        if (!p || !up) return false;
+        const door = doorOf(up, p.object);
+        this.switchTo(p.doc, door ? [door.sel] : []);
+        return true;
+    }
+
     /** A map loaded from a file with the id of one already here replaces it. */
     importMap(doc: MapDoc): void {
         if (this.maps.some((m) => m.id === doc.id)) {
             this.maps = this.maps.map((m) => (m.id === doc.id ? doc : m));
-            if (doc.id === this.activeId) { this.undoStack = []; this.redoStack = []; }
+            /* The replaced map's history no longer fits it; the map that was
+               open keeps its own, for when the GM comes back to it. */
+            if (doc.id !== this.activeId) this.histories.set(this.activeId, { undo: this.undoStack, redo: this.redoStack });
+            this.histories.delete(doc.id);
+            this.undoStack = [];
+            this.redoStack = [];
             this.activeId = doc.id;
             this.dirty.add(doc.id);
             this.indexDirty = true;
@@ -333,6 +438,7 @@ export class MapStore {
 
     deleteMap(id: string): void {
         const rest = this.maps.filter((m) => m.id !== id);
+        this.histories.delete(id);
         this.maps = rest.length ? rest : [createDoc({ name: 'New map' })];
         this.dirty.add(id);
         if (!rest.length) this.dirty.add(this.maps[0].id);
@@ -428,6 +534,7 @@ export function findObject(doc: MapDoc, sel: Selection): { id: string } | undefi
         case 'label': return doc.labels.find((o) => o.id === sel.id);
         case 'path': return doc.paths.find((o) => o.id === sel.id);
         case 'sketch': return doc.sketches.find((o) => o.id === sel.id);
+        case 'placed': return doc.placed.find((o) => o.id === sel.id);
     }
 }
 
@@ -435,7 +542,8 @@ export function findObject(doc: MapDoc, sel: Selection): { id: string } | undefi
    are replaced, never mutated, so identity is enough. */
 function sameDoc(a: MapDoc, b: MapDoc): boolean {
     return a.terrain === b.terrain && a.edges === b.edges && a.fog === b.fog && a.fillers === b.fillers && a.stamps === b.stamps && a.tokens === b.tokens
-        && a.labels === b.labels && a.paths === b.paths && a.sketches === b.sketches && a.picture === b.picture;
+        && a.labels === b.labels && a.paths === b.paths && a.sketches === b.sketches && a.picture === b.picture
+        && a.placed === b.placed && a.look === b.look && a.room === b.room;
 }
 
 function readIndex(): SavedIndex | null {

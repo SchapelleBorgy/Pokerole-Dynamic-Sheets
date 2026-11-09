@@ -88,6 +88,10 @@
 
 .map-list li.active { border-color: var(--accent-border); background: var(--accent-faint); }
 
+/* A city or interior, under the map it opens from. */
+.map-list-branch { color: var(--text-muted); font-size: 0.75em; margin-right: 0.25rem; opacity: 0.7; }
+.map-list-name > .fa-solid:not(.map-list-branch) { color: var(--text-muted); margin-right: 0.15rem; }
+
 .map-list-open {
     flex: 1 1 auto;
     min-width: 0;

@@ -9,6 +9,7 @@ import { MAX_CELLS, MIN_CELLS, clampCells, resizeDoc } from '../../map/doc';
 import { EDGE_KINDS, MAX_SOFT, MIN_SOFT } from '../../map/edges';
 import { swatchBackground } from './SidePanel';
 import type { EdgeKind } from '../../map/types';
+import { LOOKS, lookOf } from '../../map/world/looks';
 import { exportSize, renderMapPng } from '../../map/render/exportPng';
 import type { ExportResult } from '../../map/render/exportPng';
 import { exportLoader, folderReadable, pickAppFolder, readAppFolder, readsFromDisk } from '../../map/render/exportImages';
@@ -60,6 +61,55 @@ export function StyleControl() {
                             <span>
                                 <strong>{st.name}</strong>
                                 <span className="muted">{STYLE_HINTS[st.id]}</span>
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            </Popover>
+        </>
+    );
+}
+
+/** A city or interior's look (world/looks.ts): how its buildings are
+    coloured, and the ground under them. Ancient also switches the map's own
+    style to Ancient, so the terrain is drawn on the same old paper. */
+export function LookControl() {
+    const { store, doc } = useMap();
+    const pop = usePopover();
+    if (doc.kind === 'world') return null;
+    const current = lookOf(doc.look);
+    return (
+        <>
+            <button
+                ref={pop.anchor} className="icon-btn map-style-btn" aria-expanded={pop.open} data-look-btn=""
+                title="Look: how the buildings are coloured" onClick={() => pop.setOpen((o) => !o)}
+            >
+                <i className={'fa-solid ' + current.icon}></i> <span className="map-style-name">{current.name}</span> <i className="fa-solid fa-caret-down"></i>
+            </button>
+            <Popover anchor={pop.anchor} open={pop.open} onClose={pop.close}>
+                <div className="map-popover-title">Look</div>
+                <div className="map-style-list">
+                    {LOOKS.map((l) => (
+                        <button
+                            key={l.id}
+                            className="map-style-choice"
+                            aria-pressed={current.id === l.id}
+                            data-look={l.id}
+                            onClick={() => {
+                                if (current.id !== l.id) {
+                                    store.edit((d) => {
+                                        d.look = l.id;
+                                        if (l.id === 'ancient') d.styleId = 'ancient';
+                                        else if (d.styleId === 'ancient') d.styleId = 'anime';
+                                    });
+                                }
+                                pop.close();
+                            }}
+                        >
+                            <i className={'fa-solid ' + l.icon}></i>
+                            <span>
+                                <strong>{l.name}</strong>
+                                <span className="muted">{l.hint}</span>
                             </span>
                         </button>
                     ))}

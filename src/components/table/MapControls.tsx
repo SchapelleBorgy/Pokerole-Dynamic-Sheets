@@ -36,7 +36,7 @@ export function MapControls() {
                                 <strong className="map-entry-title">{e.title}</strong>
                                 <span className="muted">
                                     {e.active && <span className="map-entry-on">On show · </span>}
-                                    {e.w}×{e.h}{e.live ? ' · live' : e.fromMaker ? ' · Map Maker' : ''}
+                                    {e.w}×{e.h}{e.live ? ' · live' : e.fromMaker ? ' · World Builder' : ''}
                                 </span>
                                 <div className="map-buttons">
                                     <button
@@ -90,9 +90,10 @@ export function MapControls() {
                 {map.entries.length > 1
                     ? <>Players see only the map on show; the others stay with you, ready to switch to. </>
                     : <>Hold up to {MAX_TABLE_MAPS} maps and choose which one players see. </>}
-                From the Map Maker: open it in another tab of this browser. Its <strong>Table</strong> button
-                adds the map here as a snapshot, or keeps it live as you edit it. Players only ever see a
-                picture with the fog drawn in.
+                From the World Builder: open it in another tab of this browser. <strong>Show this scene</strong>
+                there puts the map you are on straight on show; its <strong>Table</strong> button adds a map here
+                as a snapshot, or keeps it live as you edit it. Players only ever see a picture with the fog
+                drawn in.
             </p>
             </>}
         </div>

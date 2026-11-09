@@ -193,7 +193,7 @@ export function TableView() {
                 id={tourId}
                 steps={tableSteps(session, isHost ? 'gm' : 'player')}
                 intro={isHost
-                    ? 'A one-minute tour of the Game Master\u2019s side: the table itself, and how to bring maps from the Map Maker and fights from the GM screen onto it.'
+                    ? 'A one-minute tour of the Game Master\u2019s side: the table itself, and how to bring maps from the World Builder and fights from the GM screen onto it.'
                     : 'A one-minute tour of the table: your character, the dice, the feed and fights.'}
             />
         </div>

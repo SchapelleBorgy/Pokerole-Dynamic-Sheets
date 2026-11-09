@@ -106,7 +106,7 @@ export function RecipeDialog({ open, onClose }: { open: boolean; onClose: () => 
             <div className="map-dialog-title"><i className="fa-solid fa-scroll"></i> Map from a description</div>
             <p className="map-recipe-intro">
                 Describe the map, copy the instructions into any chat assistant, then paste its whole reply below.
-                The instructions explain everything the Map Maker can draw, so the assistant does not have to guess.
+                The instructions explain everything the World Builder can draw, so the assistant does not have to guess.
             </p>
 
             <div className="map-dialog-sub">1 · Describe it</div>

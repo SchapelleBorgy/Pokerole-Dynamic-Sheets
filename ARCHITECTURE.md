@@ -52,7 +52,7 @@ bundle, and its own browser tab:
 | `pokemon-card.html` | One Pokémon's card — a team member, a boxed one, or a wild |
 | `gm-screen.html` | The GM board: roster, combat tracker, dice, NPC names, notes |
 | `rolling-table.html` | A shared dice table. The only page that needs the network — see [The rolling table](#the-rolling-table) |
-| `map-maker.html` | A map editor for regions, towns and battle maps — see [The Map Maker](#the-map-maker) |
+| `map-maker.html` | The World Builder: regions, the cities in them and the rooms inside — see [The Map Maker](#the-map-maker) |
 
 They are linked by a shared working set in `localStorage` under
 `pokerole_working`. The license writes it; the card reads the Pokémon it was
@@ -135,6 +135,37 @@ content clipped away by `overflow: hidden`, controls too small to hit, and
 fields that would trigger the iOS zoom.
 
 ## The Map Maker
+
+Shown to users as the **World Builder** (2026-11-08); the file, the code and
+the storage keys keep the old name. A map has a `kind` — `world`, `city` or
+`interior` ([`src/map/world.ts`](src/map/world.ts)) — and they link: a
+landmark's `link` names the map it opens, that map's `parent` names the
+landmark it is entered from. The strip under the bar (`WorldStrip`) shows the
+trail and the scene players see; double-click a linked landmark (Select or
+Pan) to step in, `Esc` with nothing selected to step out. Each map keeps its
+own undo history and view while another is open. Players see the **scene**:
+"Show this scene" makes the map on screen the live map and puts it on show,
+and the scene it replaces leaves the table (`image.show` / `image.replaces`);
+live follows the scene by id, so moving around never changes what players see.
+
+**The city builder** ([`src/map/world/`](src/map/world/)). Cities and interiors
+hold `MapDoc.placed`: catalogue items ([`catalog.ts`](src/map/world/catalog.ts),
+~170 of them: buildings, nature, street, furniture, kitchen & bath, shops;
+every building in 2-3 `variants`, and an `era` for the Modern / Medieval sets) that
+stand on a FOOTPRINT of whole cells and are drawn as a taller SPRITE anchored
+to its bottom edge ([`placed.ts`](src/map/world/placed.ts)). Placed things and
+tokens are drawn in one layer back to front by the footprint's bottom edge
+(`depthOrder`), in the editor (`PlacedLayer.tsx`, one canvas each, redrawn
+per zoom step) and in the picture (`exportPng`). All the art is vector:
+painters ([`buildings.ts`](src/map/world/buildings.ts), `props.ts`, `props2.ts`,
+`interior.ts`, `medieval.ts`, `modern.ts`) draw through a `Pen` that applies the map's LOOK
+([`looks.ts`](src/map/world/looks.ts): Colorful, Ancient, Pastel, Night),
+which also filters the ground under them. A building can open an interior
+like a landmark (`link`/`parent`). Overlaps are allowed and shown in red.
+An interior also has a floor plan, `MapDoc.room` ([`room.ts`](src/map/world/room.ts)):
+an outline of corners on the grid, edited with the Room tool's handles
+(`RoomLayer.tsx`); the edges with the room below them stand as wallpapered back
+walls, the rest is floor, and outside it is dark.
 
 `map-maker.html` edits maps of any scale on one square grid: a cell means
 whatever the map's scale label says. A map is one `MapDoc`
@@ -396,7 +427,9 @@ Maker in another tab of the same browser, over a same-origin `BroadcastChannel`
 ([`src/lib/tableLink.ts`](src/lib/tableLink.ts)): a one-off snapshot, or **live**,
 where every finished edit is sent on its own ([`src/map/tableLive.ts`](src/map/tableLive.ts)).
 A Map Maker map is one entry at the table however often it is sent; a live one
-keeps up while another map is on show.
+keeps up while another map is on show. Live follows its map by id, not the map
+open in the editor, and **Show this scene** moves it to the map on screen and
+puts that on show, taking the previous scene off the table.
 The fog of war is enforced by what is drawn
 ([`playerView.ts`](src/map/render/playerView.ts)): the map data never leaves
 the GM's browser, the fog is always drawn and sealed back to full strength

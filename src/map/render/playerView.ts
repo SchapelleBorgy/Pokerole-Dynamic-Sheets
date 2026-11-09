@@ -5,6 +5,8 @@ import type { MapDoc } from '../types';
 import { isHidden } from '../../lib/tableLink';
 import type { MapObjectInfo, PlayerHide } from '../../lib/tableLink';
 import { landmarkOf } from '../landmarks';
+import { anchorOf } from '../world/placed';
+import { itemOf } from '../world/catalog';
 
 /* The map as the players at the shared table see it.
 
@@ -73,6 +75,9 @@ export function playerDoc(doc: MapDoc, hide: PlayerHide | null = null): MapDoc {
         tokens: doc.tokens.filter((t) => !hiddenAt(doc, fog, t.x, t.y) && !isHidden(hide, 'token', t.id)),
         paths: doc.paths.filter((p) => !p.points.every(([x, y]) => hiddenAt(doc, fog, x, y))),
         sketches: doc.sketches.filter((k) => !k.points.every(([x, y]) => hiddenAt(doc, fog, x, y))),
+        /* A building goes with its front door: under full fog, or kept off
+           the table as a landmark, it is not drawn at all. */
+        placed: doc.placed.filter((o) => !hiddenAt(doc, fog, ...anchorOf(o)) && !isHidden(hide, 'stamp', o.id)),
     };
 }
 
@@ -84,6 +89,11 @@ export function mapObjects(doc: MapDoc): MapObjectInfo[] {
     for (const s of doc.stamps) {
         const name = (s.label || '').trim() || landmarkOf(s.landmark).name;
         out.push({ id: s.id, kind: 'stamp', name, fogged: hiddenAt(doc, fog, s.x, s.y) });
+    }
+    /* Buildings and props are listed with the landmarks: the table hides them the same way. */
+    for (const o of doc.placed) {
+        const name = (o.label || '').trim().split('\n')[0] || itemOf(o.item).name;
+        out.push({ id: o.id, kind: 'stamp', name, fogged: hiddenAt(doc, fog, ...anchorOf(o)) });
     }
     for (const t of doc.tokens) {
         out.push({ id: t.id, kind: 'token', name: t.name.trim() || 'Token', fogged: hiddenAt(doc, fog, t.x, t.y) });

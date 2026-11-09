@@ -347,14 +347,16 @@ export class MapShare {
         this.announce();
     }
 
-    /** Takes one map off the table and out of the relay. */
-    remove(key: string): void {
+    /** Takes one map off the table and out of the relay. `keepHides`: a
+        World Builder scene giving way to the next keeps what the GM hid on
+        it, for when it is shown again. */
+    remove(key: string, keepHides = false): void {
         if (!this.host) return;
         if (key === this.uploadingKey) this.droppedWhileUploading = true;
         const old = this.entries.find((e) => e.key === key);
         if (!old) return;
         this.entries = this.entries.filter((e) => e.key !== key);
-        if (old.mapId) delete this.hides[old.mapId];
+        if (old.mapId && !keepHides) delete this.hides[old.mapId];
         this.queued.get(key)?.skip();
         this.queued.delete(key);
         const wasActive = this.active === key;
@@ -567,6 +569,10 @@ export class MapShare {
             }
             return;
         }
+        if (m.t === 'show') {
+            this.activate('mm:' + m.mapId);
+            return;
+        }
         if (m.t !== 'image') return;
 
         let error = '';
@@ -576,6 +582,10 @@ export class MapShare {
             const w = Math.round(m.w), h = Math.round(m.h);
             if (!(w > 0 && h > 0 && w <= LIMITS.MAX_MAP_SIDE && h <= LIMITS.MAX_MAP_SIDE)) throw new Error('That picture is too big.');
             await this.stage('mm:' + m.mapId, m.image, w, h, title, m.live, m.mapId, m.objects);
+            /* A World Builder scene: on show at once, and the one it takes
+               over from leaves the table — players moved on from it. */
+            if (m.show) this.activate('mm:' + m.mapId);
+            if (m.replaces && this.entries.some((e) => e.key === 'mm:' + m.replaces)) this.remove('mm:' + m.replaces, true);
         } catch (e) {
             error = e instanceof Error ? e.message : 'The table could not take the map.';
             this.set({ error });

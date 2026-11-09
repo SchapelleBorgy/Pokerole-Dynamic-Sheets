@@ -103,8 +103,8 @@ export function TableLinkControl({ link, currentId }: { link: TableLiveLink; cur
                         {s.shown
                             ? 'Players are looking at another map. '
                             : 'Nothing is on show at the table. '}
-                        The table can hold several maps: players see this one once you press
-                        <strong> Show</strong> beside it there.
+                        Press <strong>Show this scene</strong> under the bar to put this map on show,
+                        or <strong>Show</strong> beside it in the table's own list.
                     </p>
                 )}
 

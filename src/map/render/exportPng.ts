@@ -12,8 +12,11 @@ import { fogImage } from './fog';
 import { drawSketch } from '../sketch';
 import { buildGeometry, drawGrid, drawTerrain } from './terrain';
 import { loadPicture } from '../picture';
+import { depthOrder, drawPlaced, spriteBox } from '../world/placed';
+import { drawRoom } from '../world/room';
+import { lookOf } from '../world/looks';
 import type { TextureSource } from './terrain';
-import type { MapDoc, MapLabel, MapPath, MapStamp, MapToken } from '../types';
+import type { MapDoc, MapLabel, MapPath, MapPlaced, MapStamp, MapToken } from '../types';
 import {
     applyLabelTransform, fontOf, isPlain, labelType, layoutGlyphs, lineBaselines, measureWith, plainLineX, shadowOf,
 } from '../labelText';
@@ -464,6 +467,27 @@ async function drawToken(ctx: CanvasRenderingContext2D, t: MapToken, style: MapS
     return !!art;
 }
 
+/** A placed building's label, under its sprite, as the editor letters it. */
+function drawPlacedLabel(ctx: CanvasRenderingContext2D, p: MapPlaced): void {
+    const b = spriteBox(p);
+    const size = 12;
+    ctx.save();
+    ctx.font = `600 ${size}px Outfit, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.lineJoin = 'round';
+    const x = (b.x + b.w / 2) * CELL;
+    p.label!.split('\n').forEach((line, i) => {
+        const y = (b.y + b.h) * CELL + 4 + i * size * 1.1;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3.5;
+        ctx.strokeText(line, x, y);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(line, x, y);
+    });
+    ctx.restore();
+}
+
 /* ------------------------------------------------------------ the export */
 
 export interface ExportResult {
@@ -515,6 +539,27 @@ export async function renderMapPng(doc: MapDoc, opts: ExportOptions, load: Image
     let missing = 0;
     for (const p of doc.paths) drawPath(ctx, p, style);
     for (const s of doc.stamps) if (!(await drawStamp(ctx, s, style, load))) missing++;
+    /* A city or interior (World Builder): the look's filter over the ground
+       drawn so far, then its buildings and tokens together, back to front,
+       as the editor shows them — under the labels. */
+    const city = doc.kind !== 'world';
+    if (city) {
+        const filter = lookOf(doc.look).ground(doc.styleId);
+        if (filter) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.filter = filter;
+            ctx.globalCompositeOperation = 'copy';
+            ctx.drawImage(canvas, 0, 0);
+            ctx.restore();
+        }
+        if (doc.room) drawRoom(ctx, doc.room, CELL, doc.look, doc.cols, doc.rows);
+        for (const e of depthOrder(doc.placed, opts.tokens ? doc.tokens : [])) {
+            if (e.kind === 'placed') drawPlaced(ctx, e.obj, CELL, doc.look);
+            else if (!(await drawToken(ctx, e.obj, style, load))) missing++;
+        }
+        for (const p of doc.placed) if (p.label && p.labelShow !== 'hover') drawPlacedLabel(ctx, p);
+    }
     for (const l of doc.labels) drawLabel(ctx, l, style);
     if (doc.sketches.length) {
         /* Kept on the map: a fat line along the edge would otherwise spill
@@ -526,7 +571,7 @@ export async function renderMapPng(doc: MapDoc, opts: ExportOptions, load: Image
         for (const k of doc.sketches) drawSketch(ctx, k, CELL);
         ctx.restore();
     }
-    if (opts.tokens) for (const t of doc.tokens) if (!(await drawToken(ctx, t, style, load))) missing++;
+    if (opts.tokens && !city) for (const t of doc.tokens) if (!(await drawToken(ctx, t, style, load))) missing++;
     const fog = opts.fog ? fogImage(doc) : null;
     if (fog) {
         ctx.imageSmoothingEnabled = true;

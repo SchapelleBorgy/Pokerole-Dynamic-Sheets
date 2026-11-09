@@ -70,11 +70,24 @@
 
 .map-tool:disabled { opacity: 0.35; cursor: default; }
 
-.map-rail-sep {
-    width: 70%;
+/* Tools in groups of related ones, a short thin line between groups. */
+.map-rail-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    flex: 0 0 auto;
+}
+
+.map-rail-group:empty { display: none; }
+
+.map-rail-group:not(:empty) ~ .map-rail-group:not(:empty)::before {
+    content: '';
+    width: 60%;
     height: 1px;
-    background: var(--border-color);
-    margin: 0.2rem 0;
+    background: currentColor;
+    opacity: 0.3;
+    margin: 0.15rem 0;
     flex: 0 0 auto;
 }
 
@@ -332,3 +345,61 @@
 }
 
 html[data-device="phone"] .map-live-banner { flex-wrap: wrap; padding: 0.4rem 0.6rem; }
+
+/* ---------------- World Builder: where you are, and the scene ---------------- */
+
+.map-world-strip {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.25rem 1rem;
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--panel-strong);
+}
+.map-world-strip .spacer { flex: 1 1 auto; }
+.map-world-up { flex: 0 0 auto; }
+
+.map-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+}
+.map-crumbs li { display: flex; align-items: center; gap: 0.2rem; min-width: 0; }
+/* The outer steps give way first; the map you are on keeps its name longest. */
+.map-crumbs li:not([aria-current]) { flex: 0 1 auto; }
+.map-crumbs li[aria-current] { flex: 0 0 auto; max-width: 45%; }
+
+.map-crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    max-width: 16rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+.map-crumb > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-crumb > i { color: var(--text-muted); flex: 0 0 auto; }
+button.map-crumb:hover { border-color: var(--border-color); color: var(--text-primary); }
+.map-crumb.current { color: var(--text-primary); font-weight: 600; max-width: none; }
+.map-crumb-sep { color: var(--text-muted); font-size: 0.6rem; flex: 0 0 auto; }
+
+.map-scene { display: flex; align-items: center; gap: 0.5rem; flex: 0 1 auto; min-width: 0; }
+.map-scene-elsewhere { max-width: 20rem; }
+.map-scene-btn { flex: 0 0 auto; padding: 0.25rem 0.7rem; font-size: 0.8rem; }
+.map-scene-on { display: inline-flex; align-items: center; gap: 0.45rem; color: #fecaca; font-weight: 600; white-space: nowrap; }
+
+html[data-device="phone"] .map-world-strip { flex-wrap: wrap; padding: 0.25rem 0.6rem; row-gap: 0.25rem; }
+html[data-device="phone"] .map-crumbs li[aria-current] { max-width: none; }

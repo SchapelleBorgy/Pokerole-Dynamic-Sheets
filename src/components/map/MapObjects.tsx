@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { MapSprite } from './MapSprite';
 import { fillerTerrain, landmarkOf } from '../../map/landmarks';
 import { fillerUrl } from '../../map/fillerStamps';
+import { linkedDoc } from '../../map/world';
 import { landmarkChain, markerChain, pokemonTokenChain } from '../../map/sprites';
 import { midpoint, polygonD, riverInkD, sampleCurve, smoothPathD, taperOutline } from '../../map/geometry';
 import type { Pt } from '../../map/geometry';
@@ -139,11 +140,14 @@ export function PathsLayer({ doc, style, selection, draft, onDown }: {
 
 /* ----------------------------------------------------------------- stamps */
 
-function StampView({ stamp, style, selected, alone, onDown }: {
+function StampView({ stamp, style, selected, alone, onDown, opens }: {
     stamp: MapStamp; style: MapStyle; selected: boolean;
     /** Selected on its own: only then does it get resize and turn handles. */
     alone: boolean;
     onDown: ObjectDown;
+    /** The map it opens (World Builder), shown as a door in its corner —
+        in the editor only: pictures of the map leave it out. */
+    opens?: MapDoc;
 }) {
     const def = landmarkOf(stamp.landmark);
     const px = stamp.size * CELL;
@@ -188,6 +192,12 @@ function StampView({ stamp, style, selected, alone, onDown }: {
                     <i className={'fa-solid ' + (TYPE_ICONS[stamp.type!] || 'fa-circle')}></i>
                 </span>
             )}
+            {opens && (
+                <span className="map-link-badge" data-opens={opens.id} style={{ fontSize: Math.max(8, px * 0.15) }}
+                    title={'Opens ' + (opens.name || 'a map') + ' — double-click to step inside'}>
+                    <i className="fa-solid fa-door-open"></i>
+                </span>
+            )}
             {stamp.label && (
                 <span className="map-stamp-label" style={{
                     fontFamily: lab.font, fontWeight: lab.weight, color: lab.color,
@@ -206,15 +216,17 @@ function StampView({ stamp, style, selected, alone, onDown }: {
     );
 }
 
-export function StampsLayer({ doc, style, selection, onDown }: {
+export function StampsLayer({ doc, style, selection, onDown, maps = [] }: {
     doc: MapDoc; style: MapStyle; selection: Selection[]; onDown: ObjectDown;
+    /** Every map, to find what a landmark opens. */
+    maps?: MapDoc[];
 }) {
     return (
         <>
             {doc.stamps.map((s) => (
                 <StampView
                     key={s.id} stamp={s} style={style} selected={isSel(selection, 'stamp', s.id)}
-                    alone={selection.length === 1} onDown={onDown}
+                    alone={selection.length === 1} onDown={onDown} opens={linkedDoc(maps, s)}
                 />
             ))}
         </>
@@ -372,7 +384,7 @@ export function SketchesLayer({ doc, selection, draft, onDown }: {
 
 /* ----------------------------------------------------------------- tokens */
 
-function TokenView({ token, style, selected, onDown }: {
+export function TokenView({ token, style, selected, onDown }: {
     token: MapToken; style: MapStyle; selected: boolean; onDown: ObjectDown;
 }) {
     const px = token.size * CELL;

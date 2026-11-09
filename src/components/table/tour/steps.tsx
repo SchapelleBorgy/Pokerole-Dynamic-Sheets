@@ -21,7 +21,7 @@ function mapStatus(session: TableSession) {
     return {
         ok: true,
         text: entries.length + (entries.length === 1 ? ' map' : ' maps') + ' on the table'
-            + (maker ? ', ' + maker + ' from the Map Maker' : '') + '.' + shown,
+            + (maker ? ', ' + maker + ' from the World Builder' : '') + '.' + shown,
     };
 }
 
@@ -115,14 +115,14 @@ const gmSteps = (session: TableSession): TourStep[] => [
     },
     {
         id: 'map',
-        title: 'Show a map from the Map Maker',
+        title: 'Show a map from the World Builder',
         target: [T('map-controls')],
         unfold: 'map',
-        links: [{ label: 'Open the Map Maker', href: 'map-maker.html', icon: 'fa-map' }],
+        links: [{ label: 'Open the World Builder', href: 'map-maker.html', icon: 'fa-map' }],
         status: () => mapStatus(session),
         body: <>
             <ol className="tour-steps">
-                <li>Open the <strong>Map Maker</strong> in another tab of <em>this same browser</em>.</li>
+                <li>Open the <strong>World Builder</strong> in another tab of <em>this same browser</em>.</li>
                 <li>Its toolbar now has a <Btn icon="fa-dice">Table</Btn> button. Choose
                     <Btn icon="fa-camera">Send a snapshot</Btn> for a picture, or
                     <Btn icon="fa-tower-broadcast">Go live</Btn> to keep it in step as you edit.</li>

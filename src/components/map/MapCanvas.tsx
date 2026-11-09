@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react';
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react';
+import { linkedDoc } from '../../map/world';
+import { dims, placeAt, spriteBox, variantOf } from '../../map/world/placed';
+import { itemOf } from '../../map/world/catalog';
+import { RoomHandles, RoomLayer } from './RoomLayer';
+import { lookOf } from '../../map/world/looks';
+import { BuildGhost, DepthLayer, resFor } from './PlacedLayer';
 import { useMap } from '../../map/MapContext';
 import { PATH_KINDS, styleOf } from '../../map/styles';
 import { snapPoint, snapsFor, uid } from '../../map/doc';
@@ -170,13 +176,14 @@ function capture(el: HTMLElement, pointerId: number): void {
 /** Remove whatever `data-obj` names from the doc. */
 function removeObject(d: MapDoc, tag: string): boolean {
     const [kind, id] = tag.split(':');
-    const count = () => d.stamps.length + d.tokens.length + d.labels.length + d.paths.length + d.sketches.length;
+    const count = () => d.stamps.length + d.tokens.length + d.labels.length + d.paths.length + d.sketches.length + d.placed.length;
     const before = count();
     if (kind === 'stamp') d.stamps = d.stamps.filter((o) => o.id !== id);
     if (kind === 'token') d.tokens = d.tokens.filter((o) => o.id !== id);
     if (kind === 'label') d.labels = d.labels.filter((o) => o.id !== id);
     if (kind === 'path') d.paths = d.paths.filter((o) => o.id !== id);
     if (kind === 'sketch') d.sketches = d.sketches.filter((o) => o.id !== id);
+    if (kind === 'placed') d.placed = d.placed.filter((o) => o.id !== id);
     return count() !== before;
 }
 
@@ -192,6 +199,8 @@ function objectsInBox(d: MapDoc, a: Pt, b: Pt): Selection[] {
         ...d.stamps.filter((o) => inBox(o.x, o.y)).map((o) => ({ kind: 'stamp' as const, id: o.id })),
         ...d.labels.filter((o) => inBox(o.x, o.y)).map((o) => ({ kind: 'label' as const, id: o.id })),
         ...d.tokens.filter((o) => inBox(o.x, o.y)).map((o) => ({ kind: 'token' as const, id: o.id })),
+        ...d.placed.filter((o) => { const { w, h } = dims(o); return inBox(o.x + w / 2, o.y + h / 2); })
+            .map((o) => ({ kind: 'placed' as const, id: o.id })),
     ];
 }
 
@@ -199,10 +208,14 @@ function objectsInBox(d: MapDoc, a: Pt, b: Pt): Selection[] {
 function positionsOf(d: MapDoc, sel: Selection): Pt[] {
     if (sel.kind === 'path') return (d.paths.find((p) => p.id === sel.id)?.points ?? []).map((p) => [p[0], p[1]] as Pt);
     if (sel.kind === 'sketch') return (d.sketches.find((k) => k.id === sel.id)?.points ?? []).map((p) => [p[0], p[1]] as Pt);
+    if (sel.kind === 'placed') { const o = d.placed.find((x) => x.id === sel.id); return o ? [[o.x, o.y]] : []; }
     const list = sel.kind === 'stamp' ? d.stamps : sel.kind === 'token' ? d.tokens : d.labels;
     const o = (list as { id: string; x: number; y: number }[]).find((x) => x.id === sel.id);
     return o ? [[o.x, o.y]] : [];
 }
+
+/** Where each map was looked at from, this session (World Builder). */
+const VIEWS = new Map<string, View>();
 
 export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
     const { store, doc, ui } = useMap();
@@ -246,11 +259,16 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         setView({ zoom, x: (w - d.cols * CELL * zoom) / 2, y: (h - d.rows * CELL * zoom) / 2 });
     }, [store]);
 
-    /* A different map, or the first measurement: frame the whole of it. */
+    /* A different map, or the first measurement: frame the whole of it —
+       or, for a map already visited this session, put the view back where
+       it was, so stepping into a city and out again lands on the same spot. */
     useEffect(() => {
         if (!size.w || fitted.current === doc.id) return;
+        if (fitted.current) VIEWS.set(fitted.current, viewRef.current);
         fitted.current = doc.id;
-        fit();
+        const was = VIEWS.get(doc.id);
+        if (was) setView(was);
+        else fit();
     }, [doc.id, size.w, fit]);
 
     useEffect(() => {
@@ -347,6 +365,25 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         return [(sx - v.x) / v.zoom / CELL, (sy - v.y) / v.zoom / CELL];
     };
     const inside = ([x, y]: Pt) => x >= 0 && y >= 0 && x <= store.doc.cols && y <= store.doc.rows;
+
+    /* A double-click on a landmark that opens a map steps into it. Tested by
+       geometry rather than by the event's target, which pointer capture
+       may have moved to the stage; only under Select and Pan, so a quick
+       double dab of the brush over a town never leaves the map. */
+    const onDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+        const t = store.ui.tool;
+        if ((t !== 'select' && t !== 'pan') || spaceHeld) return;
+        const [x, y] = toCell(e);
+        /* A building first: they stand over the landmarks. */
+        const building = [...store.doc.placed].reverse().find((o) => {
+            if (!o.link || !linkedDoc(store.maps, o)) return false;
+            const b = spriteBox(o);
+            return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+        });
+        const hit = building ?? [...store.doc.stamps].reverse().find((st) =>
+            st.link && Math.abs(x - st.x) <= st.size / 2 && Math.abs(y - st.y) <= st.size / 2 && linkedDoc(store.maps, st));
+        if (hit) { e.preventDefault(); store.enter(hit.id); }
+    };
 
     const publish = (g: Stroking) => {
         if (g.frame != null) { cancelAnimationFrame(g.frame); g.frame = null; }
@@ -589,6 +626,21 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
                 store.setUi({ selection: [{ kind: 'stamp', id }] });
                 return;
             }
+            case 'build': {
+                if (!inside(at)) return;
+                const item = store.ui.buildItem;
+                const rot = store.ui.buildRot;
+                const variant = variantOf(itemOf(item), store.ui.buildVariant);
+                const [x, y] = placeAt(item, rot, variant, at, store.doc.grid.snap);
+                const id = uid();
+                store.edit((d) => {
+                    d.placed = [...d.placed, {
+                        id, item, x, y, ...(rot ? { rot } : {}), ...(variant ? { variant } : {}), ...(store.ui.buildFlip ? { flip: true } : {}),
+                    }];
+                });
+                store.setUi({ selection: [{ kind: 'placed', id }] });
+                return;
+            }
             case 'token': {
                 const tok = store.ui.token;
                 if (!tok) { toast('<i class="fa-solid fa-circle-info"></i> Choose a token in the side panel first.'); return; }
@@ -679,7 +731,7 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
         const at = toCell(e);
         const g = gesture.current;
         if (!g) {
-            if (brushTool(store.ui.tool, store.ui.eraseMode) || store.ui.tool === 'fill') setHover(at);
+            if (brushTool(store.ui.tool, store.ui.eraseMode) || store.ui.tool === 'fill' || store.ui.tool === 'build') setHover(at);
             return;
         }
         switch (g.kind) {
@@ -779,7 +831,14 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
     const moveItems = (items: { sel: Selection; orig: Pt[] }[], anchor: number, dx: number, dy: number) => {
         const d0 = store.doc;
         const lead = items[anchor];
-        if (lead && (lead.sel.kind === 'stamp' || lead.sel.kind === 'token')) {
+        if (lead && lead.sel.kind === 'placed') {
+            /* A building's footprint sits on whole cells. */
+            const o = d0.placed.find((x) => x.id === lead.sel.id);
+            if (o && snapsFor(d0, o)) {
+                dx = Math.round(lead.orig[0][0] + dx) - lead.orig[0][0];
+                dy = Math.round(lead.orig[0][1] + dy) - lead.orig[0][1];
+            }
+        } else if (lead && (lead.sel.kind === 'stamp' || lead.sel.kind === 'token')) {
             const list = lead.sel.kind === 'stamp' ? d0.stamps : d0.tokens;
             const o = (list as { id: string; size: number; snap?: boolean }[]).find((x) => x.id === lead.sel.id);
             if (o && snapsFor(d0, o)) {
@@ -797,6 +856,7 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
             d.stamps = place(d.stamps, 'stamp');
             d.tokens = place(d.tokens, 'token');
             d.labels = place(d.labels, 'label');
+            d.placed = place(d.placed, 'placed');
             d.paths = d.paths.map((p) => {
                 const pts = shift('path', p.id);
                 return pts ? { ...p, points: pts.map(([x, y]) => [x, y] as [number, number]) } : p;
@@ -870,6 +930,11 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
     /* ---------------------------------------------------------------- render */
 
     const W = doc.cols * CELL, H = doc.rows * CELL;
+    /* Cities and interiors draw their placed things and tokens by depth,
+       and may filter the ground for their look. */
+    const city = doc.kind !== 'world';
+    const groundFilter = city ? lookOf(doc.look).ground(doc.styleId) : '';
+    const res = resFor(view.zoom);
     const slot = brushTool(ui.tool, ui.eraseMode) ? slotOf(ui.tool) : null;
     const showBrush = hover && (slot || ui.tool === 'fill') && !spaceHeld && !(ui.tool === 'paint' && ui.paintLayer === 'single');
     const cursorTool = spaceHeld ? 'pan' : ui.tool;
@@ -879,24 +944,38 @@ export function MapCanvas({ spaceHeld }: { spaceHeld: boolean }) {
             ref={stageRef}
             className={'map-stage' + (gesture.current?.kind === 'pan' ? ' panning' : '')}
             data-tool={cursorTool}
+            data-look={city ? (doc.look ?? 'colorful') : undefined}
+            style={groundFilter ? { '--ground-filter': groundFilter } as CSSProperties : undefined}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onPointerLeave={onPointerLeave}
             onContextMenu={(e) => e.preventDefault()}
+            onDoubleClick={onDoubleClick}
         >
             <canvas ref={canvasRef} className="map-canvas" style={{ width: size.w, height: size.h }} />
             <div
                 className={'map-world' + (style.pixelated ? ' pixelated' : '')}
                 style={{ width: W, height: H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
             >
+                {/* An interior's walls and floor, over the ground and under everything on it. */}
+                {doc.room && (
+                    <RoomLayer room={doc.room} look={doc.look} cols={doc.cols} rows={doc.rows} res={res}
+                        grid={doc.grid.show ? doc.grid.opacity || 0.5 : 0} />
+                )}
                 <PathsLayer doc={doc} style={style} selection={ui.selection} draft={draft} onDown={onObjectDown} />
-                <StampsLayer doc={doc} style={style} selection={ui.selection} onDown={onObjectDown} />
+                <StampsLayer doc={doc} style={style} selection={ui.selection} onDown={onObjectDown} maps={store.maps} />
+                {/* A city or interior: buildings and tokens in one layer, back to front, under the labels. */}
+                {city && <DepthLayer doc={doc} style={style} selection={ui.selection} res={res} maps={store.maps} onDown={onObjectDown} />}
+                {city && ui.tool === 'build' && hover && !spaceHeld && (
+                    <BuildGhost doc={doc} item={ui.buildItem} rot={ui.buildRot} variant={ui.buildVariant} flip={ui.buildFlip} at={hover} res={res} />
+                )}
                 <LabelsLayer doc={doc} style={style} selection={ui.selection} onDown={onObjectDown} />
                 <SketchesLayer doc={doc} selection={ui.selection} draft={sketchDraft} onDown={onObjectDown} />
-                <TokensLayer doc={doc} style={style} selection={ui.selection} onDown={onObjectDown} />
+                {!city && <TokensLayer doc={doc} style={style} selection={ui.selection} onDown={onObjectDown} />}
                 {(!ui.fogHidden || ui.tool === 'fog' || ui.tool === 'unfog') && <FogLayer doc={doc} />}
+                {doc.room && ui.tool === 'room' && <RoomHandles store={store} room={doc.room} cols={doc.cols} rows={doc.rows} zoom={view.zoom} />}
                 {box && (
                     <div
                         className="map-marquee"

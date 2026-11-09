@@ -9,6 +9,7 @@ import { COMMON_FOLDER, MAP_SPRITE_BASE, imageExists, terrainTextureUrl } from '
 import { MAX_CELLS, MIN_CELLS, clampCells, createDoc, uid } from '../../map/doc';
 import type { MapDoc, StyleId } from '../../map/types';
 import { buildNewMap } from '../../map/recipeBuild';
+import { KIND_ICON, KIND_LABEL, mapTree } from '../../map/world';
 import { RecipeCheck, useParsedRecipe } from './RecipeCheck';
 import { PICTURE_ACCEPT, importPicture, rowsFor } from '../../map/picture';
 import type { PictureInfo } from '../../map/picture';
@@ -202,12 +203,12 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
 
     useEffect(() => { if (open) { setRenaming(null); setCreating(false); } }, [open]);
 
-    const maps = [...store.maps].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const tree = mapTree(store.maps);
 
     return (
         <Modal open={open} onClose={onClose} boxClassName="map-dialog">
             <ModalClose onClick={onClose} />
-            <div className="map-dialog-title"><i className="fa-solid fa-layer-group"></i> Your maps</div>
+            <div className="map-dialog-title"><i className="fa-solid fa-layer-group"></i> Your worlds</div>
             {creating ? (
                 <NewMapForm onCreate={(d) => { store.addMap(d); onClose(); }} onRecipe={onRecipe} />
             ) : (
@@ -221,8 +222,11 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                 </div>
             )}
             <ul className="map-list">
-                {maps.map((m) => (
-                    <li key={m.id} className={m.id === store.activeId ? 'active' : ''}>
+                {tree.map(({ doc: m, depth }) => (
+                    <li
+                        key={m.id} className={(m.id === store.activeId ? 'active' : '') + (depth ? ' map-list-child' : '')}
+                        style={depth ? { marginLeft: depth * 18 } : undefined} data-kind={m.kind}
+                    >
                         {renaming === m.id ? (
                             <input
                                 type="text"
@@ -235,7 +239,10 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                             />
                         ) : (
                             <button className="map-list-open" onClick={() => { store.switchTo(m.id); onClose(); }} title="Open this map">
-                                <span className="map-list-name">{m.name || 'Untitled map'}</span>
+                                <span className="map-list-name">
+                                    {depth > 0 && <i className="fa-solid fa-turn-up fa-rotate-90 map-list-branch"></i>}
+                                    <i className={'fa-solid ' + KIND_ICON[m.kind]} title={KIND_LABEL[m.kind]}></i> {m.name || 'Untitled map'}
+                                </span>
                                 <span className="muted">
                                     {m.cols}×{m.rows} · {MAP_STYLES.find((s) => s.id === m.styleId)?.name}
                                     {' · '}{new Date(m.updatedAt).toLocaleDateString()}
@@ -245,7 +252,12 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                         <button className="icon-btn" title="Rename" onClick={() => setRenaming(m.id)}><i className="fa-solid fa-pen"></i></button>
                         <button
                             className="icon-btn" title="Duplicate"
-                            onClick={() => store.addMap({ ...m, id: uid(), name: m.name + ' (copy)', updatedAt: new Date().toISOString() })}
+                            onClick={() => store.addMap({
+                                /* A copy stands alone: its landmarks open nothing and it is entered from
+                                   nowhere, or two maps would share one city and its way out. */
+                                ...m, id: uid(), name: m.name + ' (copy)', updatedAt: new Date().toISOString(),
+                                parent: undefined, stamps: m.stamps.map((st) => (st.link ? { ...st, link: undefined } : st)),
+                            })}
                         >
                             <i className="fa-solid fa-clone"></i>
                         </button>
@@ -255,7 +267,9 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                                 const ok = await confirm({
                                     icon: 'fa-trash', danger: true, confirmLabel: 'Delete',
                                     title: 'Delete ' + (m.name || 'this map') + '?',
-                                    text: 'It is removed from this browser. A copy you saved to a file is not touched.',
+                                    text: 'It is removed from this browser. A copy you saved to a file is not touched.'
+                                        + (store.maps.some((c) => c.parent?.doc === m.id)
+                                            ? ' The cities and interiors opened from it stay, as maps of their own.' : ''),
                                 });
                                 if (ok) store.deleteMap(m.id);
                             }}

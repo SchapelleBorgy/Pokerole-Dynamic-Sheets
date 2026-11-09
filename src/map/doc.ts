@@ -8,8 +8,11 @@ import { DEFAULT_BORDERS, MAX_SOFT, MIN_SOFT, decodeEdges, edgesOf, encodeEdges,
 import { decodeFog, encodeFog, fogOf, rememberFog } from './fog';
 import { NO_FILLER, decodeFillers, encodeFillers, fillersOf, rememberFillers } from './fillers';
 import { normalizeSketch } from './sketch';
+import { normalizePlaced } from './world/placed';
+import { isLookId } from './world/looks';
+import { normalizeRoom, resizeRoom } from './world/room';
 import type {
-    EdgeKind, LabelRole, MapBorders, MapDoc, MapLabel, MapPath, MapPicture, MapStamp, MapToken, StyleId,
+    DocKind, DocParent, EdgeKind, LookId, MapRoom, LabelRole, MapBorders, MapDoc, MapLabel, MapPath, MapPicture, MapStamp, MapToken, StyleId,
 } from './types';
 
 /* Pure operations on a MapDoc. Nothing here touches the DOM or storage, so the
@@ -29,7 +32,7 @@ export function clampCells(n: number): number {
 /** A new map: nothing painted yet, so all of it is the background. */
 export function createDoc(opts: {
     name?: string; cols?: number; rows?: number; styleId?: StyleId; background?: string; scaleLabel?: string;
-    picture?: MapPicture;
+    picture?: MapPicture; kind?: DocKind; parent?: DocParent; look?: LookId; room?: MapRoom;
 } = {}): MapDoc {
     const cols = clampCells(opts.cols ?? 40);
     const rows = clampCells(opts.rows ?? 30);
@@ -38,6 +41,7 @@ export function createDoc(opts: {
     const doc: MapDoc = {
         id: uid(),
         name: opts.name?.trim() || 'New map',
+        kind: opts.kind ?? 'world',
         styleId: opts.styleId ?? 'handdrawn',
         cols,
         rows,
@@ -55,10 +59,31 @@ export function createDoc(opts: {
         tokens: [],
         labels: [],
         sketches: [],
+        placed: [],
         updatedAt: new Date().toISOString(),
     };
     if (opts.picture) doc.picture = opts.picture;
+    if (opts.look) doc.look = opts.look;
+    if (opts.room) doc.room = opts.room;
+    if (opts.parent) doc.parent = { ...opts.parent };
     return doc;
+}
+
+const DOC_KINDS: readonly DocKind[] = ['world', 'city', 'interior'];
+
+export function isDocKind(v: unknown): v is DocKind {
+    return typeof v === 'string' && (DOC_KINDS as readonly string[]).includes(v);
+}
+
+/** An id another map is named by: short and plain, or nothing. */
+const refId = (v: unknown): string | undefined =>
+    typeof v === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v) ? v : undefined;
+
+function normalizeParent(raw: unknown): DocParent | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const p = raw as Record<string, unknown>;
+    const doc = refId(p.doc), object = refId(p.object);
+    return doc && object ? { doc, object } : undefined;
 }
 
 const num = (v: unknown, dflt: number): number => (typeof v === 'number' && isFinite(v) ? v : dflt);
@@ -124,6 +149,7 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
     const out: MapDoc = {
         id: str(r.id, '') || uid(),
         name: str(r.name, 'Untitled map'),
+        kind: isDocKind(r.kind) ? r.kind : 'world',
         styleId,
         cols,
         rows,
@@ -149,6 +175,7 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
                 label: typeof s.label === 'string' ? s.label.replace(/\r\n?/g, '\n') : undefined,
                 labelShow: s.labelShow === 'hover' ? 'hover' as const : undefined,
                 variant: typeof s.variant === 'number' && isFinite(s.variant) ? Math.max(0, Math.round(s.variant)) : undefined,
+                link: refId(s.link),
             })),
         tokens: arr<MapToken>(r.tokens).filter((t) => t && typeof t.kind === 'string')
             .map((t) => ({
@@ -163,9 +190,16 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
                 ...labelTypeFields(l),
             })),
         sketches: arr<unknown>(r.sketches).map(normalizeSketch).filter((k): k is NonNullable<typeof k> => !!k),
+        placed: arr<unknown>(r.placed).map(normalizePlaced).filter((o): o is NonNullable<typeof o> => !!o)
+            .map((o) => (o.id ? o : { ...o, id: uid() })),
         updatedAt: str(r.updatedAt, new Date().toISOString()),
     };
     if (picture) out.picture = picture;
+    if (isLookId(r.look)) out.look = r.look;
+    const room = normalizeRoom(r.room, out.cols, out.rows);
+    if (room) out.room = room;
+    const parent = normalizeParent(r.parent);
+    if (parent && parent.doc !== out.id) out.parent = parent;
     return out;
 }
 
@@ -293,6 +327,8 @@ export function resizeDoc(doc: MapDoc, cols: number, rows: number): MapDoc {
         labels: doc.labels.map((l) => ({ ...l, x: cx(l.x), y: cy(l.y) })),
         paths: doc.paths.map((p) => ({ ...p, points: p.points.map(([x, y]) => [cx(x), cy(y)] as [number, number]) })),
         sketches: doc.sketches.map((k) => ({ ...k, points: k.points.map(([x, y]) => [cx(x), cy(y)] as [number, number]) })),
+        placed: doc.placed.map((o) => ({ ...o, x: Math.min(o.x, Math.max(0, cols - 1)), y: Math.min(o.y, Math.max(0, rows - 1)) })),
+        room: resizeRoom(doc.room, cols, rows),
     };
 }
 

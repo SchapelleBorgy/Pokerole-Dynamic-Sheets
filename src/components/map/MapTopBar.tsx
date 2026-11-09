@@ -5,7 +5,7 @@ import { useToast } from '../common/Toast';
 import { useGmConfirm } from '../gm/ConfirmDialog';
 import { HomeButton } from '../common/HomeButton';
 import { TourButton } from '../common/Tour';
-import { BackgroundControl, BordersControl, ExportControl, GridControl, PictureControl, ScaleControl, SizeControl, SnapToggle, StyleControl } from './TopBarControls';
+import { BackgroundControl, BordersControl, ExportControl, GridControl, LookControl, PictureControl, ScaleControl, SizeControl, SnapToggle, StyleControl } from './TopBarControls';
 import {
     downloadMap, ensureWritable, forgetMapHandle, mapFileName, mapJson, parseMapFile,
     readMapHandle, rememberMapHandle, writeMapFile,
@@ -14,6 +14,7 @@ import type { MapDoc } from '../../map/types';
 import { keyHint, useHotkeys } from '../../map/hotkeys';
 import type { TableLiveLink } from '../../map/tableLive';
 import { TableLinkControl } from './TableLinkControl';
+import { KIND_ICON } from '../../map/world';
 
 /* The bar across the top: which map, how it is drawn, and its file. */
 
@@ -124,10 +125,10 @@ export function MapTopBar({ onMaps, onSprites, onHotkeys, onRecipe, tableLink }:
         <div className="topbar map-topbar">
             <HomeButton className="icon-btn" />
             <TourButton id="map" className="icon-btn" />
-            <span className="logo"><i className="fa-solid fa-map"></i> <span className="map-logo-text">Map Maker</span></span>
+            <span className="logo"><i className="fa-solid fa-map"></i> <span className="map-logo-text">World Builder</span></span>
 
-            <button className="map-name-btn" onClick={onMaps} title="Your maps — open, create, rename">
-                <i className="fa-solid fa-layer-group"></i>
+            <button className="map-name-btn" onClick={onMaps} title="Your worlds, cities and interiors — open, create, rename">
+                <i className={'fa-solid ' + KIND_ICON[doc.kind]}></i>
                 <span className="map-name-text">{doc.name || 'Untitled map'}</span>
                 <i className="fa-solid fa-caret-down"></i>
             </button>
@@ -143,6 +144,7 @@ export function MapTopBar({ onMaps, onSprites, onHotkeys, onRecipe, tableLink }:
 
             <div className="map-styles">
                 <StyleControl />
+                <LookControl />
                 <BackgroundControl />
                 <PictureControl />
                 <BordersControl />

@@ -301,3 +301,74 @@ img.pixelated { image-rendering: pixelated; }
     pointer-events: none;
     image-rendering: auto;
 }
+
+/* A landmark that opens a map of its own (World Builder): a door in the
+   corner opposite a Gym's type badge. The editor's only; pictures leave it out. */
+.map-link-badge {
+    position: absolute;
+    left: 2%;
+    top: 2%;
+    min-width: 1.7em;
+    height: 1.7em;
+    border-radius: 0.5em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: #2563ebdd;
+    border: 1.5px solid #fff;
+    box-shadow: 0 1px 4px #0006;
+    pointer-events: none;
+}
+
+/* ---------------- City builder: placed buildings and props ---------------- */
+
+/* The box round a placed thing holds its canvas (the sprite plus room for
+   shadow and glow); only the hit box over the sprite takes the pointer. */
+.map-placed { position: absolute; pointer-events: none; }
+.map-placed-art { position: absolute; left: 0; top: 0; pointer-events: none; }
+.map-placed-hit { position: absolute; border-radius: 4px; }
+.map-placed.selected .map-placed-hit { outline: 2px solid var(--accent); outline-offset: 2px; }
+.map-placed-foot {
+    position: absolute;
+    border: 2px dashed #ffffffd0;
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px #0007;
+    pointer-events: none;
+}
+/* Overlapping another standing thing, or off the map: allowed, but said. */
+.map-placed.clash .map-placed-foot { border-color: #ff4d4d; background: #ff4d4d26; }
+.map-placed.ghost { opacity: 0.68; }
+.map-placed-door { position: absolute; transform: translate(-25%, -25%); }
+.map-placed-label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: pre;
+    text-align: center;
+    line-height: 1.1;
+    font: 600 12px Outfit, sans-serif;
+    color: #fff;
+    text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000;
+    pointer-events: none;
+}
+.map-placed.label-hover .map-placed-label { opacity: 0; transition: opacity 0.12s; }
+.map-placed.label-hover:hover .map-placed-label,
+.map-placed.label-hover.selected .map-placed-label { opacity: 1; }
+
+/* A look's filter on the ground (world/looks.ts): the terrain, the paths
+   and the landmarks under a night town or a pastel one. */
+.map-stage .map-canvas,
+.map-world > .map-paths,
+.map-world > .map-stamp { filter: var(--ground-filter, none); }
+
+/* An interior's walls and floor, and the Room tool's handles on its corners. */
+.map-room { position: absolute; left: 0; top: 0; pointer-events: none; }
+.map-room-handles { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.map-room-outline { fill: none; stroke: var(--accent); stroke-dasharray: 0.2 0.12; }
+.map-room-corner { fill: #fff; stroke: var(--accent); pointer-events: all; cursor: grab; }
+.map-room-corner:hover { fill: var(--accent); }
+.map-room-add { pointer-events: all; cursor: copy; }
+.map-room-add circle { fill: var(--accent); opacity: 0.75; }
+.map-room-add path { stroke: #fff; }
+.map-room-add:hover circle { opacity: 1; }

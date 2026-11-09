@@ -607,3 +607,49 @@
     outline-offset: -1px;
     box-shadow: 0 0 6px var(--accent-glow);
 }
+
+/* A landmark's own map (World Builder): open it, or make one. */
+.map-inside {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-top: 0.4rem;
+    padding: 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    background: #ffffff08;
+}
+.map-inside-title { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
+.map-inside-title > i { color: var(--text-muted); margin-right: 0.25rem; }
+.map-inside-create { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.map-inside-create > button, .map-inside-open { flex: 1 1 auto; }
+.map-inside .map-hint { margin: 0; }
+
+/* The Build tool's catalogue and a placed thing's colours. */
+.map-build-thumb { object-fit: contain; }
+.map-placed-colors { display: flex; flex-wrap: wrap; gap: 0.35rem 0.6rem; align-items: center; }
+.map-placed-color { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: var(--text-secondary); }
+.map-placed-color input[type="color"] { width: 1.9rem; height: 1.5rem; padding: 0; border: 1px solid var(--border-color); border-radius: 5px; background: none; cursor: pointer; }
+
+/* The Build palette: the thing picked, its variants, the Modern/Medieval filter. */
+.map-build-era { margin-bottom: 8px; }
+.map-build-current {
+    display: flex; flex-direction: column; gap: 6px; padding: 8px; margin-bottom: 8px;
+    border: 1px solid var(--border-color); border-radius: 10px; background: var(--panel-solid);
+}
+.map-build-current-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.map-build-current-head > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.map-build-current-art { width: 44px; height: 44px; object-fit: contain; flex: none; }
+.map-variants { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.map-variant {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; min-width: 0;
+    border: 1px solid var(--border-color); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit;
+}
+.map-variant img { width: 40px; height: 40px; object-fit: contain; }
+.map-variant span { font-size: 0.7rem; line-height: 1.15; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-variant.on { border-color: var(--accent); background: var(--accent-faint); }
+.map-tile { position: relative; }
+.map-tile-count {
+    position: absolute; top: 3px; right: 3px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+    font-size: 0.62rem; line-height: 15px; text-align: center; background: var(--accent); color: #fff;
+}

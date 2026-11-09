@@ -7,16 +7,19 @@ import type { TourStep } from '../../lib/tour';
 import { TourChip as Btn } from '../common/Tour';
 
 export const MAP_TOUR_INTRO =
-    'A one-minute tour of the Map Maker: the tools, the shortcuts that are easy to miss, fog of war, '
+    'A one-minute tour of the World Builder: the tools, the shortcuts that are easy to miss, fog of war, '
     + 'and showing a map to your players.';
 
 export const MAP_STEPS: TourStep[] = [
     {
         id: 'welcome',
-        title: 'The Map Maker',
+        title: 'The World Builder',
         body: <>
             <p>Paint regions, towns and dungeons cell by cell, then dress them with landmarks, paths, labels
                 and tokens. Every map keeps itself in this browser as you work.</p>
+            <p>A landmark can open a map of its own: a city on the world map, a building in the city.
+                Select it and choose <strong>Create</strong> in its panel, then double-click it to step inside;
+                <kbd>Esc</kbd> steps back out.</p>
         </>,
     },
     {
@@ -24,7 +27,8 @@ export const MAP_STEPS: TourStep[] = [
         title: 'Your maps',
         target: ['.map-name-btn'],
         body: <>
-            <p>Keep as many maps as you like: this menu opens, creates, renames and duplicates them.</p>
+            <p>Keep as many maps as you like: this menu opens, creates, renames and duplicates them, with each
+                city and interior listed under the map it opens from.</p>
             <p><Btn icon="fa-scroll" /> further along draws a map <strong>from a description</strong>: it gives
                 you instructions to paste into a chat assistant, and builds the map from its reply.</p>
         </>,
@@ -34,7 +38,8 @@ export const MAP_STEPS: TourStep[] = [
         title: 'The tools',
         target: ['.map-rail'],
         body: <>
-            <p>Terrain, fill, paths, landmarks, tokens, labels and freehand sketches, top to bottom.</p>
+            <p>In groups, top to bottom: selecting and moving about; the ground (paint, fill, shapes, paths,
+                borders, eraser); things placed on it (landmarks, buildings, tokens); labels and sketches; fog.</p>
             <ul className="tour-steps">
                 <li>The wheel zooms. Drag with the <strong>middle mouse button</strong>, or hold
                     <kbd>Space</kbd>, to move around with any tool.</li>

@@ -46,6 +46,10 @@ export interface MapStamp {
     /** Snap to the grid: true or false overrides the map's own setting,
         absent follows it. */
     snap?: boolean;
+    /** The id of the map this landmark opens: a city on a world map, an
+        interior in a city. Absent, or naming a map that is gone: nothing to
+        open yet. See world.ts. */
+    link?: string;
 }
 
 export type TokenKind = 'pokemon' | 'trainer' | 'wild';
@@ -88,6 +92,50 @@ export interface MapSketch {
         first point at the end). Absent: a smooth freehand curve. */
     straight?: boolean;
 }
+
+/** A building, tree or bench in a city (the World Builder's city builder):
+    a catalogue item standing on a FOOTPRINT of whole cells, drawn by a
+    vector painter as a sprite taller than the footprint and anchored to its
+    bottom edge, so a roof overlaps what stands behind it. See world/placed.ts. */
+export interface MapPlaced {
+    id: string;
+    /** The catalogue slug — see world/catalog.ts. Append-only, like landmarks. */
+    item: string;
+    /** The footprint's top-left corner, in cells. */
+    x: number;
+    y: number;
+    flip?: boolean;
+    /** Turned a quarter: the footprint's width and depth swap. Only items
+        that offer it (fences, benches, hedges). */
+    rot?: 1;
+    /** Which of the item's variants (world/catalog.ts); the first when absent. */
+    variant?: number;
+    /** The item's own colours, slot by slot; a missing slot keeps the
+        catalogue's. */
+    colors?: string[];
+    label?: string;
+    labelShow?: 'hover';
+    /** The map it opens, like a landmark's — an interior. */
+    link?: string;
+    snap?: boolean;
+}
+
+/** An interior's floor plan (world/room.ts): an outline of corners on whole
+    cells; outside it is nothing, the edges with the room below them stand as
+    back walls `wallH` cells tall. */
+export interface MapRoom {
+    pts: [number, number][];
+    wallH: number;
+    floor: import('./world/room').FloorKind;
+    floorColor: string;
+    wall: import('./world/room').WallKind;
+    wallColor: string;
+    /** The tops of the walls and the skirting. */
+    trim: string;
+}
+
+/** How a city or interior's buildings are coloured — see world/looks.ts. */
+export type LookId = 'colorful' | 'ancient' | 'pastel' | 'night';
 
 export type LabelRole = 'region' | 'town' | 'route' | 'small';
 
@@ -171,9 +219,23 @@ export interface MapPicture {
     opacity: number;
 }
 
+/** What a map is in the World Builder: a region, a city in it, or the inside
+    of a building. Every kind is drawn and edited the same way for now; the
+    city and interior builders add their own layers. */
+export type DocKind = 'world' | 'city' | 'interior';
+
+/** Where a map is entered from: the map and the landmark on it that links here. */
+export interface DocParent {
+    doc: string;
+    object: string;
+}
+
 export interface MapDoc {
     id: string;
     name: string;
+    /** Absent in a map from before the World Builder: a world map. */
+    kind: DocKind;
+    parent?: DocParent;
     styleId: StyleId;
     cols: number;
     rows: number;
@@ -209,14 +271,21 @@ export interface MapDoc {
     labels: MapLabel[];
     /** Freehand sketches, drawn over the labels and under the tokens. */
     sketches: MapSketch[];
+    /** Buildings and street furniture (cities and interiors), drawn in depth
+        order with the tokens. Empty on a world map. */
+    placed: MapPlaced[];
+    /** The colouring of the placed things; absent: Colorful. */
+    look?: LookId;
+    /** An interior's floor plan: walls, floor and wallpaper (world/room.ts). */
+    room?: MapRoom;
     /** ISO time of the last change, for the map list. */
     updatedAt: string;
 }
 
 /** Which object is selected, if any. */
 export interface Selection {
-    kind: 'stamp' | 'token' | 'label' | 'path' | 'sketch';
+    kind: 'stamp' | 'token' | 'label' | 'path' | 'sketch' | 'placed';
     id: string;
 }
 
-export type Tool = 'select' | 'paint' | 'fill' | 'shape' | 'erase' | 'edge' | 'fog' | 'unfog' | 'path' | 'stamp' | 'token' | 'label' | 'sketch' | 'pan';
+export type Tool = 'select' | 'paint' | 'fill' | 'shape' | 'erase' | 'edge' | 'fog' | 'unfog' | 'path' | 'stamp' | 'build' | 'room' | 'token' | 'label' | 'sketch' | 'pan';

@@ -18,12 +18,15 @@ import { LabelTypeEditor } from './LabelTypeEditor';
 import { EDGE_KINDS, EDGE_NAME, paintValue } from '../../map/edges';
 import { FOG_COLORS, fogValue, fullFog } from '../../map/fog';
 import { EDGE_TINT, hasFiller } from '../../map/render/terrain';
-import type { EdgeKind, MapDoc, MapLabel, MapPath, MapSketch, MapStamp, MapToken, Selection } from '../../map/types';
+import type { EdgeKind, MapDoc, MapLabel, MapPath, MapPlaced, MapSketch, MapStamp, MapToken, Selection } from '../../map/types';
 import { riverInkD } from '../../map/geometry';
 import { SketchFields, SketchPalette } from './SketchPanel';
 import { ShapePicker } from './ShapePicker';
 import type { MapStore } from '../../map/store';
 import { brushSizeHint, panHint, useHotkeys } from '../../map/hotkeys';
+import { KIND_ICON, KIND_LABEL, childKinds, linkCandidates, linkedDoc } from '../../map/world';
+import { BuildPalette, PlacedFields, RoomPanel } from './BuildPanel';
+import { itemOf } from '../../map/world/catalog';
 
 /* The right-hand panel: what the current tool lays down, and — once something
    is selected — the inspector for it. Every field is controlled (`value=`) and
@@ -677,6 +680,7 @@ function patchObject(store: MapStore, sel: Selection, patch: Record<string, unkn
         if (sel.kind === 'label') d.labels = d.labels.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapLabel : o));
         if (sel.kind === 'path') d.paths = d.paths.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapPath : o));
         if (sel.kind === 'sketch') d.sketches = d.sketches.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapSketch : o));
+        if (sel.kind === 'placed') d.placed = d.placed.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapPlaced : o));
     }, sel.id + ':' + Object.keys(patch).join(','));
 }
 
@@ -684,6 +688,7 @@ function patchObject(store: MapStore, sel: Selection, patch: Record<string, unkn
 function selectedIds(store: MapStore): Record<Selection['kind'], Set<string>> {
     const out = {
         stamp: new Set<string>(), token: new Set<string>(), label: new Set<string>(), path: new Set<string>(), sketch: new Set<string>(),
+        placed: new Set<string>(),
     };
     for (const sel of store.ui.selection) out[sel.kind].add(sel.id);
     return out;
@@ -698,6 +703,7 @@ export function deleteSelection(store: MapStore): void {
         d.labels = d.labels.filter((o) => !ids.label.has(o.id));
         d.paths = d.paths.filter((o) => !ids.path.has(o.id));
         d.sketches = d.sketches.filter((o) => !ids.sketch.has(o.id));
+        d.placed = d.placed.filter((o) => !ids.placed.has(o.id));
     });
     store.setUi({ selection: [] });
 }
@@ -713,13 +719,17 @@ export function duplicateSelection(store: MapStore): void {
         ...list.filter((o) => ids[kind].has(o.id)).map((o) => {
             const id = uid();
             made.push({ kind, id });
-            return { ...o, id, x: o.x + off, y: o.y + off };
+            /* A copy opens nothing: one way in to each city or interior. */
+            const copied = { ...o, id, x: o.x + off, y: o.y + off } as T & { link?: string };
+            delete copied.link;
+            return copied;
         }),
     ];
     store.edit((d) => {
         d.stamps = copy(d.stamps, 'stamp');
         d.tokens = copy(d.tokens, 'token');
         d.labels = copy(d.labels, 'label');
+        d.placed = copy(d.placed, 'placed');
         d.paths = [
             ...d.paths,
             ...d.paths.filter((o) => ids.path.has(o.id)).map((o) => {
@@ -756,6 +766,7 @@ function restack(store: MapStore, top: boolean): void {
         d.labels = move(d.labels, ids.label);
         d.paths = move(d.paths, ids.path);
         d.sketches = move(d.sketches, ids.sketch);
+        d.placed = move(d.placed, ids.placed);
     });
 }
 
@@ -774,7 +785,7 @@ function GroupActions() {
 
 const KIND_NAMES: Record<Selection['kind'], [string, string]> = {
     stamp: ['landmark', 'landmarks'], token: ['token', 'tokens'], label: ['label', 'labels'], path: ['path', 'paths'],
-    sketch: ['sketch', 'sketches'],
+    sketch: ['sketch', 'sketches'], placed: ['building or prop', 'buildings and props'],
 };
 
 /** Several things selected: what they are, and what can be done to all of them. */
@@ -790,6 +801,47 @@ function GroupInspector({ selection }: { selection: Selection[] }) {
             </p>
             <GroupActions />
         </section>
+    );
+}
+
+/** What a landmark opens: a city or an interior of its own (World Builder). */
+function InsideSection({ doc, stamp }: { doc: MapDoc; stamp: { id: string; link?: string } }) {
+    const { store } = useMap();
+    const target = linkedDoc(store.maps, stamp);
+    const candidates = linkCandidates(store.maps, doc);
+    return (
+        <div className="map-inside" data-inside="">
+            <div className="map-inside-title"><i className="fa-solid fa-door-open"></i> Inside</div>
+            {target ? (
+                <>
+                    <button className="accent map-inside-open" data-enter="" onClick={() => store.enter(stamp.id)}>
+                        <i className={'fa-solid ' + KIND_ICON[target.kind]}></i> Open {target.name || 'it'}
+                    </button>
+                    <p className="map-hint">Or double-click the landmark. <kbd>Esc</kbd> steps back out to this map.</p>
+                </>
+            ) : (
+                <>
+                    <div className="map-inside-create">
+                        {childKinds(doc.kind).map((k) => (
+                            <button key={k} data-create={k} onClick={() => store.createInside(stamp.id, k)}>
+                                <i className={'fa-solid ' + KIND_ICON[k]}></i> Create {k === 'city' ? 'a city' : 'an interior'}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="map-hint">A map of its own behind this landmark, opened from here.</p>
+                </>
+            )}
+            {(candidates.length > 0 || target) && (
+                <label className="map-field">
+                    <span>Opens</span>
+                    <select value={target?.id ?? ''} data-link-select="" onChange={(e) => store.linkTo(stamp.id, e.currentTarget.value || null)}>
+                        <option value="">Nothing</option>
+                        {candidates.map((m) => <option key={m.id} value={m.id}>{KIND_LABEL[m.kind]}: {m.name || 'Untitled'}</option>)}
+                        {target && !candidates.some((m) => m.id === target.id) && <option value={target.id}>{target.name || 'Untitled'}</option>}
+                    </select>
+                </label>
+            )}
+        </div>
     );
 }
 
@@ -888,6 +940,18 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
                     </label>
                 </div>
                 <SnapChoice value={s.snap} mapSnap={doc.grid.snap} onChange={(v) => set(snapPatch(doc, s, v))} />
+                {!filler && <InsideSection doc={doc} stamp={s} />}
+            </>
+        );
+    } else if (sel.kind === 'placed') {
+        const o = doc.placed.find((x) => x.id === sel.id);
+        if (!o) return null;
+        const def = itemOf(o.item);
+        title = def.name;
+        body = (
+            <>
+                <PlacedFields doc={doc} p={o} set={set} />
+                {def.enterable && <InsideSection doc={doc} stamp={o} />}
             </>
         );
     } else if (sel.kind === 'token') {
@@ -972,6 +1036,8 @@ export function SidePanel() {
     switch (ui.tool) {
         case 'paint': case 'fill': case 'shape': palette = <TerrainPalette style={style} />; break;
         case 'stamp': palette = <LandmarkPalette style={style} />; break;
+        case 'build': palette = doc.kind === 'world' ? null : <BuildPalette />; break;
+        case 'room': palette = doc.kind === 'interior' ? <RoomPanel /> : null; break;
         case 'path': palette = <PathPalette style={style} />; break;
         case 'token': palette = <TokenPalette style={style} />; break;
         case 'label': palette = <LabelPalette />; break;

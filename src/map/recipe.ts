@@ -601,7 +601,7 @@ function round(n: number): number {
 /** The issues, written for the assistant that wrote the recipe. */
 export function issuesForAssistant(issues: RecipeIssue[]): string {
     const lines = issues.map((i) => `- ${i.level === 'error' ? 'ERROR' : 'warning'} at ${i.where}: ${i.message}`);
-    return 'The Map Maker checked your recipe and found these problems. ERROR items were left out of the map; '
+    return 'The World Builder checked your recipe and found these problems. ERROR items were left out of the map; '
         + 'warnings were adjusted as described.\n\n' + lines.join('\n')
         + '\n\nReply with the whole corrected recipe as one ```json code block, following the same instructions as before.';
 }

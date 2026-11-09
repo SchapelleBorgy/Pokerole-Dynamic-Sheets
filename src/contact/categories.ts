@@ -37,7 +37,7 @@ export interface Category {
 }
 
 export const PAGES_ASKED = [
-    "Trainer's License", 'Pokémon Card', 'GM Screen', 'Map Maker', 'Rolling Table',
+    "Trainer's License", 'Pokémon Card', 'GM Screen', 'World Builder', 'Rolling Table',
     'Contact Center', 'Several / all of them', 'Other',
 ];
 
