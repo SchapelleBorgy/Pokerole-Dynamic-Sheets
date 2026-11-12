@@ -5,7 +5,7 @@ import {
 import { normalizeFolders } from './folders';
 import { DEFAULT_GEN_OPTS, RECENT_ROLLS } from './generator';
 import type { GmGenOpts } from './generator';
-import type { GmCombat, GmCombatant, GmLayout, GmState } from './types';
+import type { GmCombat, GmCombatant, GmGift, GmLayout, GmNpcShare, GmState } from './types';
 
 export function uid(): string {
     return 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -14,7 +14,7 @@ export function uid(): string {
 /** A fresh, empty fight. The name is what the panel's head is titled. */
 export function newCombat(name: string): GmCombat {
     return {
-        gid: uid(), name, round: 1, participants: [], turnsOn: false, turn: null, passed: [], passOrder: null, pass: 1,
+        gid: uid(), name, round: 1, participants: [], turnsOn: false, turn: null, passed: [], passOrder: null, pass: 1, pipsDone: true,
     };
 }
 
@@ -27,6 +27,8 @@ export function defaultGmState(): GmState {
         combatFocus: first.gid,
         tableCombat: null,
         tablePcs: {},
+        npcShares: {},
+        gifts: [],
         notes: '',
         noteSheets: [],
         noteFolders: [],
@@ -95,14 +97,27 @@ function normalizeCombat(raw: unknown, fallbackName: string): GmCombat {
     const round = Number(r.round);
     const pass = Number(r.pass);
     const ids = (v: unknown) => (Array.isArray(v) ? v : []).filter((x): x is string => typeof x === 'string');
+    let participants = (Array.isArray(r.participants) ? r.participants : []) as GmCombatant[];
+    const turn = typeof r.turn === 'string' ? r.turn : null;
+    /* Saved while a pip filled as a turn STARTED: the combatant on turn has
+       one pip too many under the rule now (pips are actions done), and would
+       pay twice when the turn passes. */
+    if (r.pipsDone !== true && r.turnsOn === true && turn) {
+        participants = participants.map((p) => {
+            const q = p as unknown as { pid?: string; acted?: number };
+            return q.pid === turn && (q.acted || 0) > 0 ? { ...p, acted: (q.acted || 0) - 1 } : p;
+        });
+    }
     return {
         gid: typeof r.gid === 'string' && r.gid ? r.gid : uid(),
         name: typeof r.name === 'string' && r.name.trim() ? r.name : fallbackName,
         round: round > 0 ? Math.floor(round) : 1,
-        participants: (Array.isArray(r.participants) ? r.participants : []) as GmCombatant[],
+        participants,
         /* A fight saved before the turn tracker keeps no turns until started. */
         turnsOn: r.turnsOn === true,
-        turn: typeof r.turn === 'string' ? r.turn : null,
+        turn,
+        pipsDone: true,
+        turnSpent: r.turnSpent === true && !!turn,
         passed: ids(r.passed),
         passOrder: Array.isArray(r.passOrder) ? ids(r.passOrder) : null,
         pass: pass > 0 ? Math.floor(pass) : 1,
@@ -175,6 +190,8 @@ export function normalizeGmState(raw: unknown): GmState {
         ? r.combatFocus! : s.combats[0].gid;
     s.tableCombat = s.combats.some((c) => c.gid === r.tableCombat) ? r.tableCombat! : null;
     s.tablePcs = r.tablePcs && typeof r.tablePcs === 'object' && !Array.isArray(r.tablePcs) ? r.tablePcs : {};
+    s.npcShares = normalizeNpcShares(r.npcShares, Array.isArray(s.trainerIds) ? s.trainerIds : []);
+    s.gifts = normalizeGifts(r.gifts);
     s.dice = Object.assign({ count: 2, sides: 6, history: [] }, r.dice);
     s.nameOpts = Object.assign({}, DEFAULT_NAME_OPTS, r.nameOpts);
     s.genOpts = normalizeGenOpts(r.genOpts);
@@ -227,6 +244,33 @@ export function normalizeGmState(raw: unknown): GmState {
     s.rosterFolderOf = filed;
     s.layout = normalizeLayout(r.layout, s.combats.map((c) => combatPanelKey(c.gid)));
     return s;
+}
+
+const memberIds = (v: unknown): string[] =>
+    (Array.isArray(v) ? v : []).filter((x): x is string => typeof x === 'string' && /^[A-Z2-7]{16}$/.test(x));
+
+/** Shares of trainers still on the roster, at most MAX_NPC_SHARES. Read by
+    the rolling table as well (npcShare.ts), so it must hold whatever the
+    stored state had. */
+export const MAX_NPC_SHARES = 8;
+export function normalizeNpcShares(raw: unknown, trainerIds: string[]): Record<string, GmNpcShare> {
+    const out: Record<string, GmNpcShare> = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+    for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (!trainerIds.includes(id) || !v || typeof v !== 'object') continue;
+        if (Object.keys(out).length >= MAX_NPC_SHARES) break;
+        const share = v as Record<string, unknown>;
+        out[id] = { to: share.to === null ? null : memberIds(share.to), edit: memberIds(share.edit) };
+    }
+    return out;
+}
+
+export function normalizeGifts(raw: unknown): GmGift[] {
+    return (Array.isArray(raw) ? raw : []).filter((g): g is GmGift => !!g && typeof g === 'object'
+        && typeof g.oid === 'string' && typeof g.gid === 'string' && typeof g.dexId === 'string'
+        && typeof g.to === 'string' && /^[A-Z2-7]{16}$/.test(g.to)
+        && !!g.sheet && typeof g.sheet === 'object')
+        .map((g) => ({ ...g, toName: typeof g.toName === 'string' ? g.toName : '', at: Number(g.at) || 0 }));
 }
 
 export function loadGmState(): GmState {

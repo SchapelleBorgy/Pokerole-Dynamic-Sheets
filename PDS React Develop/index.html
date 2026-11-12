@@ -14,16 +14,21 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;600&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer">
 
     <!--
         The landing page. It lives in public/ and is copied verbatim into the
         build, so it costs nothing and cannot break the real pages. Its only job
         is that the bare site URL answers with something instead of a 404.
 
-        It carries exactly one script, at the bottom: the rolling table is the
-        only page that cannot work from the disk, and its card is greyed out
-        when this file is opened over file://. Nothing else here needs one.
+        It carries one script, at the bottom: the rolling table is the only page
+        that cannot work from the disk, so its card is greyed out when this file
+        is opened over file://; and, on the website, the same "a new version is
+        ready" bar the tools show (src/pwa/UpdatePrompt.tsx), since this page is
+        precached by the service worker like the others and would otherwise sit
+        on an old copy with nothing to say so.
     -->
     <style>
         :root {
@@ -124,7 +129,7 @@
         }
 
         /* Greyed out and inert rather than pretending it will work: the rolling
-           table on a copy opened off the disk, which has no origin to connect from. */
+           table opened from the disk, which has no origin the relay accepts. */
         a.card.disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -158,9 +163,6 @@
             font-weight: 600;
         }
 
-        /* display:block above would otherwise beat the hidden attribute */
-        .wip-note[hidden] { display: none; }
-
         footer {
             color: var(--text-dim);
             font-size: 0.78rem;
@@ -176,6 +178,52 @@
             font-family: 'Fira Code', ui-monospace, monospace;
             font-size: 0.74rem;
             opacity: 0.75;
+        }
+
+        /* The "a new version is ready" bar: the tools' own (shared/update-prompt.css)
+           in this page's colours. */
+        .update-prompt {
+            position: fixed;
+            left: 50%;
+            bottom: 18px;
+            transform: translateX(-50%);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            max-width: min(34rem, calc(100vw - 24px));
+            padding: 0.55rem 0.7rem 0.55rem 0.85rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--panel);
+            color: var(--text);
+            font-size: 0.82rem;
+            box-shadow: 0 10px 30px #000000a6, 0 0 18px 1px #c8383b40;
+        }
+        .update-prompt[hidden] { display: none; }
+        .update-prompt-icon { flex: 0 0 auto; color: var(--ghost); font-size: 0.85rem; }
+        .update-prompt-text { flex: 1 1 auto; min-width: 0; }
+        .update-prompt button {
+            flex: 0 0 auto;
+            border-radius: 999px;
+            padding: 0.28rem 0.8rem;
+            font-family: inherit;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .update-prompt-go { border: 1px solid var(--ghost); background: #c8383b33; color: var(--text); }
+        .update-prompt-go:hover { box-shadow: 0 0 10px #c8383b80; }
+        .update-prompt-later { border: 1px solid transparent; background: none; color: var(--text-dim); }
+        .update-prompt-later:hover { border-color: var(--border); color: var(--text); }
+        @media (max-width: 560px) {
+            .update-prompt {
+                left: 8px; right: 8px; bottom: 8px; max-width: none; transform: none;
+                flex-wrap: wrap; border-radius: 14px; padding: 0.6rem 0.7rem;
+            }
+            .update-prompt-text { flex: 1 0 100%; }
+            .update-prompt button { min-height: 32px; }
+            .update-prompt-go { margin-left: auto; }
         }
     </style>
 </head>
@@ -201,22 +249,18 @@
             <p class="sub">Roster, combat tracker, dice, NPC name generator and session notes.</p>
         </a>
         <a class="card" href="map-maker.html">
-            <span class="title"><i class="fa-solid fa-map"></i> <span class="name">Map Maker</span></span>
-            <p class="sub">Regions, towns and battle maps: paint terrain, place landmarks, routes and tokens.</p>
+            <span class="title"><i class="fa-solid fa-map"></i> <span class="name">World Builder</span></span>
+            <p class="sub">Regions, the cities in them and the rooms inside: paint terrain, place landmarks, routes and tokens, and step from one into the next.</p>
         </a>
-        <!-- Live: with no relay deployed the table connects browsers directly
-             (src/table/peerTransport.ts). Greyed out only on a page opened off
-             the disk — see the script at the bottom. -->
         <a class="card" id="card-table" href="rolling-table.html">
-            <span class="title">
-                <i class="fa-solid fa-dice"></i>
-                <span class="name">Rolling Table</span>
-            </span>
-            <p class="sub">A shared dice table: join with a lobby id and a password, and
-                everyone sees every roll.
-                <span class="wip-note" id="table-offline-note" hidden>Needs the hosted site &mdash;
-                    open this copy from the web to play with others.</span>
-            </p>
+            <span class="title"><i class="fa-solid fa-dice"></i> <span class="name">Rolling Table</span></span>
+            <p class="sub">Play together online: a shared dice feed, and the GM screen's fights with
+                their turn order.</p>
+        </a>
+        <a class="card" href="contact-center.html">
+            <span class="title"><i class="fa-solid fa-headset"></i> <span class="name">Contact Center</span></span>
+            <p class="sub">Report a bug, suggest an improvement or ask for something new — and read
+                what others posted.</p>
         </a>
     </nav>
 
@@ -226,15 +270,56 @@
         <p>A free, non-commercial fan tool.
             Pokerole is made by the <a href="https://www.pokeroleproject.com/">Pokerole Project</a>.</p>
     </footer>
-    <!-- A shared lobby needs the network by definition, and a page opened off
-         the disk has no origin to meet anyone from: grey the table out there. -->
+    <div class="update-prompt" id="update-prompt" role="status" hidden>
+        <i class="fa-solid fa-arrows-rotate update-prompt-icon"></i>
+        <span class="update-prompt-text">A new version of the app is ready.</span>
+        <button class="update-prompt-go" type="button">Reload now</button>
+        <button class="update-prompt-later" type="button"
+            title="Keep using this version — the offer comes back next time you open the page">Later</button>
+    </div>
+    <!-- A shared table needs the network: a copy opened from the disk has no
+         origin the relay accepts, so there the card is greyed out and says
+         where the table lives instead. -->
     <script>
         if (location.protocol === 'file:') {
             var card = document.getElementById('card-table');
             card.classList.add('disabled');
             card.setAttribute('aria-disabled', 'true');
             card.removeAttribute('href');
-            document.getElementById('table-offline-note').hidden = false;
+            var note = document.createElement('span');
+            note.className = 'wip-note';
+            note.textContent = 'Online only — open it from the website.';
+            card.querySelector('.sub').appendChild(note);
+        }
+
+        /* The service worker, registered as the tools register it (./sw.js,
+           scope ./), and its waiting update offered, never taken: the same
+           rules as src/pwa/register.ts. A worker that installs while a
+           controller is already in charge is an update; the first install
+           is not. "Reload now" posts SKIP_WAITING and reloads once the new
+           worker controls the page. */
+        if ('serviceWorker' in navigator && (location.protocol === 'http:' || location.protocol === 'https:')) {
+            var bar = document.getElementById('update-prompt');
+            var waitingWorker = null;
+            var taking = false;
+            var offer = function (w) { waitingWorker = w; bar.hidden = false; };
+            bar.querySelector('.update-prompt-go').addEventListener('click', function () {
+                if (!waitingWorker) { location.reload(); return; }
+                taking = true;
+                waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            });
+            bar.querySelector('.update-prompt-later').addEventListener('click', function () { bar.hidden = true; });
+            navigator.serviceWorker.addEventListener('controllerchange', function () { if (taking) location.reload(); });
+            navigator.serviceWorker.register('./sw.js', { scope: './' }).then(function (reg) {
+                if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+                reg.addEventListener('updatefound', function () {
+                    var w = reg.installing;
+                    if (!w) return;
+                    w.addEventListener('statechange', function () {
+                        if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w);
+                    });
+                });
+            }).catch(function () { /* no worker: nothing to offer */ });
         }
     </script>
 </body>

@@ -4,7 +4,8 @@ import { useMap } from '../../map/MapContext';
 import { LABEL_ROLES, PATH_KINDS, styleOf } from '../../map/styles';
 import type { MapStyle } from '../../map/styles';
 import { TERRAINS, TERRAIN_BY_CODE } from '../../map/terrain';
-import { LANDMARK_GROUPS, LANDMARKS, landmarkOf } from '../../map/landmarks';
+import { FILLER_PREFIX, LANDMARK_GROUPS, LANDMARKS, fillerTerrain, landmarkOf } from '../../map/landmarks';
+import { fillerTerrains, fillerUrl, fillerVariants } from '../../map/fillerStamps';
 import type { LandmarkGroup } from '../../map/landmarks';
 import { landmarkChain, markerChain, onImageArrived, pokemonTokenChain, probeImage, terrainTextureUrl } from '../../map/sprites';
 import { TILE_CELLS, patternDataUrl, tileCells } from '../../map/render/patterns';
@@ -16,11 +17,16 @@ import { BrushControls } from './BrushControls';
 import { LabelTypeEditor } from './LabelTypeEditor';
 import { EDGE_KINDS, EDGE_NAME, paintValue } from '../../map/edges';
 import { FOG_COLORS, fogValue, fullFog } from '../../map/fog';
-import { EDGE_TINT } from '../../map/render/terrain';
-import type { EdgeKind, MapDoc, MapLabel, MapPath, MapSketch, MapStamp, MapToken, Selection } from '../../map/types';
+import { EDGE_TINT, hasFiller } from '../../map/render/terrain';
+import type { EdgeKind, MapDoc, MapLabel, MapPath, MapPlaced, MapSketch, MapStamp, MapToken, Selection } from '../../map/types';
+import { riverInkD } from '../../map/geometry';
 import { SketchFields, SketchPalette } from './SketchPanel';
+import { ShapePicker } from './ShapePicker';
 import type { MapStore } from '../../map/store';
 import { brushSizeHint, panHint, useHotkeys } from '../../map/hotkeys';
+import { KIND_ICON, KIND_LABEL, childKinds, linkCandidates, linkedDoc } from '../../map/world';
+import { BuildPalette, PlacedFields, RoomPanel } from './BuildPanel';
+import { itemOf } from '../../map/world/catalog';
 
 /* The right-hand panel: what the current tool lays down, and — once something
    is selected — the inspector for it. Every field is controlled (`value=`) and
@@ -48,9 +54,32 @@ function TerrainPalette({ style }: { style: MapStyle }) {
     const [, setTick] = useState(0);
     useEffect(() => onImageArrived(() => setTick((n) => n + 1)), []);
     const backgrounds = new Map(TERRAINS.map((t) => [t.slug, swatchBackground(style, t.slug)]));
+    const fillers = ui.tool !== 'fill' && ui.paintLayer === 'fillers';
+    /* One filler at a time is the Paint tool's alone: Shapes paint areas. */
+    const single = ui.tool === 'paint' && ui.paintLayer === 'single';
+    const shape = ui.tool === 'shape';
     return (
         <section className="map-section">
-            <h3>Terrain</h3>
+            {shape && <ShapePicker />}
+            <h3>{single ? 'One filler' : fillers ? 'Fillers' : 'Terrain'}</h3>
+            {ui.tool !== 'fill' && (
+                <div className="map-segmented map-paint-layer" role="group" aria-label="What the brush paints">
+                    <button aria-pressed={!fillers && !single} onClick={() => store.setUi({ paintLayer: 'terrain' })}>
+                        <i className="fa-solid fa-layer-group"></i> Terrain
+                    </button>
+                    <button aria-pressed={fillers} onClick={() => store.setUi({ paintLayer: 'fillers' })}
+                        title="Paint a terrain's peaks, trees or flowers over the ground, on top of its own">
+                        <i className="fa-solid fa-mountain-sun"></i> Fillers only
+                    </button>
+                    {ui.tool === 'paint' && (
+                        <button aria-pressed={single} onClick={() => store.setUi({ paintLayer: 'single' })}
+                            title="Place one peak or one tree where you click, then size and turn it like a landmark">
+                            <i className="fa-solid fa-tree"></i> One filler
+                        </button>
+                    )}
+                </div>
+            )}
+            {single ? <SingleFillers style={style} /> : fillers ? <FillerPalette style={style} backgrounds={backgrounds} /> : (<>
             <div className="map-swatches">
                 {TERRAINS.map((t) => (
                     <button
@@ -58,14 +87,14 @@ function TerrainPalette({ style }: { style: MapStyle }) {
                         className={'map-swatch' + (ui.terrain === t.code ? ' on' : '')}
                         aria-pressed={ui.terrain === t.code}
                         title={t.name}
-                        onClick={() => store.setUi({ terrain: t.code, tool: ui.tool === 'fill' ? 'fill' : 'paint' })}
+                        onClick={() => store.setUi({ terrain: t.code, tool: ui.tool === 'fill' || ui.tool === 'shape' ? ui.tool : 'paint' })}
                     >
                         <span className={'map-swatch-chip' + (style.pixelated ? ' pixelated' : '')} style={{ background: backgrounds.get(t.slug) }}></span>
                         <span className="map-swatch-name">{t.name}</span>
                     </button>
                 ))}
             </div>
-            {ui.tool !== 'fill' && <BrushControls slot="paint" />}
+            {ui.tool === 'paint' && <BrushControls slot="paint" />}
             {ui.tool !== 'fill' && <SmartPaint backgrounds={backgrounds} pixelated={!!style.pixelated} />}
             <EdgeChoice
                 label="Its edges"
@@ -76,9 +105,65 @@ function TerrainPalette({ style }: { style: MapStyle }) {
             <p className="map-hint">
                 {ui.tool === 'fill'
                     ? 'Click to fill the whole connected patch of the terrain under the pointer.'
-                    : 'Drag to paint. ' + brushSizeHint() + panHint()}
+                    : shape
+                        ? 'Drag on the map to draw the shape in this terrain. Escape while dragging drops it. ' + panHint()
+                        : 'Drag to paint. ' + brushSizeHint() + panHint()}
             </p>
+            </>)}
         </section>
+    );
+}
+
+/** The brush in filler mode: which terrain's markers it lays down — the
+    peaks, flowers or trees alone, over whatever ground is there and on top
+    of that ground's own — or rubbing painted ones out. Only the terrains
+    with markers in this style are offered. */
+function FillerPalette({ style, backgrounds }: { style: MapStyle; backgrounds: Map<string, string> }) {
+    const { store, ui, doc } = useMap();
+    const offered = TERRAINS.filter((t) => hasFiller(style, t.slug));
+    const current = TERRAIN_BY_CODE.get(ui.filler);
+    const missing = ui.filler !== '_' && !offered.some((t) => t.code === ui.filler);
+    return (
+        <>
+            <div className="map-swatches">
+                <button
+                    className={'map-swatch' + (ui.filler === '_' ? ' on' : '')}
+                    aria-pressed={ui.filler === '_'}
+                    title="Rub painted fillers out"
+                    onClick={() => store.setUi({ filler: '_' })}
+                >
+                    <span className="map-swatch-chip map-filler-none"><i className="fa-solid fa-eraser"></i></span>
+                    <span className="map-swatch-name">Rub out</span>
+                </button>
+                {offered.map((t) => (
+                    <button
+                        key={t.code}
+                        className={'map-swatch' + (ui.filler === t.code ? ' on' : '')}
+                        aria-pressed={ui.filler === t.code}
+                        title={t.name}
+                        onClick={() => store.setUi({ filler: t.code })}
+                    >
+                        <span className={'map-swatch-chip' + (style.pixelated ? ' pixelated' : '')} style={{ background: backgrounds.get(t.slug) }}></span>
+                        <span className="map-swatch-name">{t.name}</span>
+                    </button>
+                ))}
+            </div>
+            {ui.tool === 'paint' && <BrushControls slot="paint" />}
+            <SmartPaint backgrounds={backgrounds} pixelated={!!style.pixelated} />
+            <div className="map-fog-actions">
+                <button disabled={!doc.fillers} onClick={() => store.edit((d) => { d.fillers = ''; })}>
+                    <i className="fa-solid fa-broom"></i> Clear all fillers
+                </button>
+            </div>
+            <p className="map-hint">
+                {missing && current ? current.name + ' has nothing to lay down in this style: pick another. ' : ''}
+                {ui.filler === '_'
+                    ? 'Drag to rub out the fillers you painted. The terrain\'s own stay. '
+                    : 'Drag to add ' + (current?.name ?? 'a terrain') + '\'s fillers — its peaks, trees or flowers — over the ground, '
+                        + 'on top of the ones it already has. The ground keeps its colour. '}
+                {(ui.tool === 'paint' ? brushSizeHint() : '') + panHint()}
+            </p>
+        </>
     );
 }
 
@@ -175,7 +260,7 @@ function ErasePalette() {
                 <>
                     <BrushControls slot="erase" />
                     <p className="map-hint">
-                        Drag to rub terrain out: the map's background{bg ? ' (' + bg.name + ')' : ''} shows through.
+                        Drag to rub terrain out, painted fillers with it: the map's background{bg ? ' (' + bg.name + ')' : ''} shows through.
                         Change the background on the top bar. {brushSizeHint()}
                     </p>
                 </>
@@ -302,7 +387,7 @@ function LandmarkPalette({ style }: { style: MapStyle }) {
                         onClick={() => store.setUi({ landmark: l.slug, tool: 'stamp' })}
                     >
                         <MapSprite
-                            candidates={landmarkChain(style, l.slug)} icon={l.icon} color={l.color}
+                            candidates={landmarkChain(style, l.slug)} icon={l.icon} color={l.color} shape={style.marker}
                             className={'map-tile-art' + (style.pixelated ? ' pixelated' : '')}
                         />
                         <span className="map-tile-name">{l.name}</span>
@@ -315,12 +400,88 @@ function LandmarkPalette({ style }: { style: MapStyle }) {
     );
 }
 
+/** The Paint tool's "One filler": a terrain's markers as single landmarks.
+    Pick the terrain, then which of its markers; a click on the map places
+    it, and from then on it is moved, sized and turned like any landmark. */
+function SingleFillers({ style }: { style: MapStyle }) {
+    const { store, ui } = useMap();
+    const terrains = fillerTerrains(style);
+    const current = terrains.some((t) => t.slug === ui.singleFiller) ? ui.singleFiller : null;
+    const pick = (slug: string) => {
+        const first = fillerVariants(style, slug)[0] ?? 0;
+        store.setUi({ singleFiller: slug, fillerVariant: first });
+    };
+    return (
+        <>
+            <div className="map-tiles">
+                {terrains.map((t) => {
+                    const v = fillerVariants(style, t.slug)[0] ?? 0;
+                    const url = fillerUrl(style, t.slug, v);
+                    return (
+                        <button
+                            key={t.slug}
+                            className={'map-tile' + (current === t.slug ? ' on' : '')}
+                            data-filler={t.slug}
+                            aria-pressed={current === t.slug}
+                            title={t.name + ': place its fillers one at a time'}
+                            onClick={() => pick(t.slug)}
+                        >
+                            {url && <img src={url} alt="" className={'map-tile-art map-filler-art' + (style.pixelated ? ' pixelated' : '')}
+                                style={{ background: style.terrain[t.slug]?.fill }} />}
+                            <span className="map-tile-name">{t.name}</span>
+                        </button>
+                    );
+                })}
+                {!terrains.length && <p className="map-hint">No terrain has fillers in this style.</p>}
+            </div>
+            {current && <FillerVariants style={style} terrain={current} value={ui.fillerVariant}
+                onPick={(v) => store.setUi({ fillerVariant: v })} />}
+            <p className="map-hint">
+                Click the map to place one {current ? TERRAINS.find((t) => t.slug === current)?.name.toLowerCase() : ''} filler
+                exactly there. Then, with Select, drag its corner to size it, its knob to turn it — or set both in its panel.
+                {' ' + panHint()}
+            </p>
+        </>
+    );
+}
+
+/** Which of a terrain's markers: a row of them to click. */
+function FillerVariants({ style, terrain, value, onPick }: {
+    style: MapStyle; terrain: string; value: number; onPick: (v: number) => void;
+}) {
+    const variants = fillerVariants(style, terrain);
+    if (variants.length < 2) return null;
+    return (
+        <div className="map-field">
+            <span>Which one</span>
+            <div className="map-filler-variants" role="group" aria-label="Which filler">
+                {variants.map((v) => (
+                    <button key={v} className="map-filler-variant" data-variant={v} aria-pressed={value === v} onClick={() => onPick(v)}
+                        style={{ background: style.terrain[terrain]?.fill }}>
+                        <img src={fillerUrl(style, terrain, v) ?? ''} alt="" className={style.pixelated ? 'pixelated' : undefined} />
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 /* ------------------------------------------------------------- paths */
 
 function PathPreview({ style, kind }: { style: MapStyle; kind: MapPath['kind'] }) {
     const look = style.paths[kind];
     const w = Math.max(2, 10 * look.widthScale);
     const d = 'M6 20 C 22 4, 38 36, 58 14';
+    if (look.taper && look.engraved) {
+        const ink = riverInkD([[6, 20], [22, 11], [38, 24], [58, 14]], 3, 10, 1);
+        return (
+            <svg className="map-path-preview" viewBox="0 0 64 32" width={64} height={32} style={{ background: style.terrain.grassland.fill }}>
+                <path d={ink.body} fill={look.color} />
+                <path d={ink.shade} fill="none" stroke={look.engraved} strokeOpacity={0.7} strokeWidth={0.6} />
+                <path d={ink.banks} fill="none" stroke={look.engraved} strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        );
+    }
     return (
         <svg className="map-path-preview" viewBox="0 0 64 32" width={64} height={32} style={{ background: style.terrain.grassland.fill }}>
             {look.casing && <path d={d} fill="none" stroke={look.casing} strokeWidth={w + 4} strokeLinecap={look.cap} />}
@@ -519,6 +680,7 @@ function patchObject(store: MapStore, sel: Selection, patch: Record<string, unkn
         if (sel.kind === 'label') d.labels = d.labels.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapLabel : o));
         if (sel.kind === 'path') d.paths = d.paths.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapPath : o));
         if (sel.kind === 'sketch') d.sketches = d.sketches.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapSketch : o));
+        if (sel.kind === 'placed') d.placed = d.placed.map((o) => (o.id === sel.id ? { ...o, ...patch } as MapPlaced : o));
     }, sel.id + ':' + Object.keys(patch).join(','));
 }
 
@@ -526,6 +688,7 @@ function patchObject(store: MapStore, sel: Selection, patch: Record<string, unkn
 function selectedIds(store: MapStore): Record<Selection['kind'], Set<string>> {
     const out = {
         stamp: new Set<string>(), token: new Set<string>(), label: new Set<string>(), path: new Set<string>(), sketch: new Set<string>(),
+        placed: new Set<string>(),
     };
     for (const sel of store.ui.selection) out[sel.kind].add(sel.id);
     return out;
@@ -540,6 +703,7 @@ export function deleteSelection(store: MapStore): void {
         d.labels = d.labels.filter((o) => !ids.label.has(o.id));
         d.paths = d.paths.filter((o) => !ids.path.has(o.id));
         d.sketches = d.sketches.filter((o) => !ids.sketch.has(o.id));
+        d.placed = d.placed.filter((o) => !ids.placed.has(o.id));
     });
     store.setUi({ selection: [] });
 }
@@ -555,13 +719,17 @@ export function duplicateSelection(store: MapStore): void {
         ...list.filter((o) => ids[kind].has(o.id)).map((o) => {
             const id = uid();
             made.push({ kind, id });
-            return { ...o, id, x: o.x + off, y: o.y + off };
+            /* A copy opens nothing: one way in to each city or interior. */
+            const copied = { ...o, id, x: o.x + off, y: o.y + off } as T & { link?: string };
+            delete copied.link;
+            return copied;
         }),
     ];
     store.edit((d) => {
         d.stamps = copy(d.stamps, 'stamp');
         d.tokens = copy(d.tokens, 'token');
         d.labels = copy(d.labels, 'label');
+        d.placed = copy(d.placed, 'placed');
         d.paths = [
             ...d.paths,
             ...d.paths.filter((o) => ids.path.has(o.id)).map((o) => {
@@ -598,6 +766,7 @@ function restack(store: MapStore, top: boolean): void {
         d.labels = move(d.labels, ids.label);
         d.paths = move(d.paths, ids.path);
         d.sketches = move(d.sketches, ids.sketch);
+        d.placed = move(d.placed, ids.placed);
     });
 }
 
@@ -616,7 +785,7 @@ function GroupActions() {
 
 const KIND_NAMES: Record<Selection['kind'], [string, string]> = {
     stamp: ['landmark', 'landmarks'], token: ['token', 'tokens'], label: ['label', 'labels'], path: ['path', 'paths'],
-    sketch: ['sketch', 'sketches'],
+    sketch: ['sketch', 'sketches'], placed: ['building or prop', 'buildings and props'],
 };
 
 /** Several things selected: what they are, and what can be done to all of them. */
@@ -632,6 +801,47 @@ function GroupInspector({ selection }: { selection: Selection[] }) {
             </p>
             <GroupActions />
         </section>
+    );
+}
+
+/** What a landmark opens: a city or an interior of its own (World Builder). */
+function InsideSection({ doc, stamp }: { doc: MapDoc; stamp: { id: string; link?: string } }) {
+    const { store } = useMap();
+    const target = linkedDoc(store.maps, stamp);
+    const candidates = linkCandidates(store.maps, doc);
+    return (
+        <div className="map-inside" data-inside="">
+            <div className="map-inside-title"><i className="fa-solid fa-door-open"></i> Inside</div>
+            {target ? (
+                <>
+                    <button className="accent map-inside-open" data-enter="" onClick={() => store.enter(stamp.id)}>
+                        <i className={'fa-solid ' + KIND_ICON[target.kind]}></i> Open {target.name || 'it'}
+                    </button>
+                    <p className="map-hint">Or double-click the landmark. <kbd>Esc</kbd> steps back out to this map.</p>
+                </>
+            ) : (
+                <>
+                    <div className="map-inside-create">
+                        {childKinds(doc.kind).map((k) => (
+                            <button key={k} data-create={k} onClick={() => store.createInside(stamp.id, k)}>
+                                <i className={'fa-solid ' + KIND_ICON[k]}></i> Create {k === 'city' ? 'a city' : 'an interior'}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="map-hint">A map of its own behind this landmark, opened from here.</p>
+                </>
+            )}
+            {(candidates.length > 0 || target) && (
+                <label className="map-field">
+                    <span>Opens</span>
+                    <select value={target?.id ?? ''} data-link-select="" onChange={(e) => store.linkTo(stamp.id, e.currentTarget.value || null)}>
+                        <option value="">Nothing</option>
+                        {candidates.map((m) => <option key={m.id} value={m.id}>{KIND_LABEL[m.kind]}: {m.name || 'Untitled'}</option>)}
+                        {target && !candidates.some((m) => m.id === target.id) && <option value={target.id}>{target.name || 'Untitled'}</option>}
+                    </select>
+                </label>
+            )}
+        </div>
     );
 }
 
@@ -659,9 +869,26 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
         const s = doc.stamps.find((o) => o.id === sel.id);
         if (!s) return null;
         const def = landmarkOf(s.landmark);
+        const filler = fillerTerrain(s.landmark);
+        const style = styleOf(doc.styleId);
         title = def.name;
         body = (
             <>
+                {filler ? (
+                    <>
+                        <label className="map-field">
+                            <span>Filler of</span>
+                            <select value={filler} onChange={(e) => {
+                                const slug = e.currentTarget.value;
+                                set({ landmark: FILLER_PREFIX + slug, variant: fillerVariants(style, slug)[0] ?? 0 });
+                            }}>
+                                {fillerTerrains(style).map((t) => <option key={t.slug} value={t.slug}>{t.name}</option>)}
+                                {!fillerTerrains(style).some((t) => t.slug === filler) && <option value={filler}>{def.name}</option>}
+                            </select>
+                        </label>
+                        <FillerVariants style={style} terrain={filler} value={s.variant ?? 0} onPick={(v) => set({ variant: v })} />
+                    </>
+                ) : (
                 <label className="map-field">
                     <span>Landmark</span>
                     <select value={s.landmark} onChange={(e) => set({ landmark: e.currentTarget.value })}>
@@ -672,10 +899,30 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
                         ))}
                     </select>
                 </label>
+                )}
                 <label className="map-field">
                     <span>Label</span>
-                    <input type="text" value={s.label ?? ''} placeholder="Shown under it" onChange={(e) => set({ label: e.currentTarget.value })} />
+                    <textarea
+                        className="map-stamp-label-field"
+                        rows={Math.min(8, Math.max(2, (s.label ?? '').split('\n').length))}
+                        value={s.label ?? ''}
+                        placeholder={'Shown under it.\nEnter starts a new line.'}
+                        onChange={(e) => set({ label: e.currentTarget.value })}
+                    />
                 </label>
+                <div className="map-field">
+                    <span>Show the label</span>
+                    <div className="map-segmented map-label-show" role="group" aria-label="When the label shows">
+                        <button aria-pressed={s.labelShow !== 'hover'} onClick={() => set({ labelShow: undefined })}
+                            title="The label is always on the map, and in pictures of it">
+                            <i className="fa-solid fa-eye"></i> Always
+                        </button>
+                        <button aria-pressed={s.labelShow === 'hover'} onClick={() => set({ labelShow: 'hover' })}
+                            title="The label appears only while the pointer is over the landmark. Pictures of the map (PNG, the table) leave it out">
+                            <i className="fa-solid fa-arrow-pointer"></i> On hover
+                        </button>
+                    </div>
+                </div>
                 {def.typed && (
                     <label className="map-field">
                         <span>Type</span>
@@ -693,6 +940,18 @@ function Inspector({ doc, sel }: { doc: MapDoc; sel: Selection }) {
                     </label>
                 </div>
                 <SnapChoice value={s.snap} mapSnap={doc.grid.snap} onChange={(v) => set(snapPatch(doc, s, v))} />
+                {!filler && <InsideSection doc={doc} stamp={s} />}
+            </>
+        );
+    } else if (sel.kind === 'placed') {
+        const o = doc.placed.find((x) => x.id === sel.id);
+        if (!o) return null;
+        const def = itemOf(o.item);
+        title = def.name;
+        body = (
+            <>
+                <PlacedFields doc={doc} p={o} set={set} />
+                {def.enterable && <InsideSection doc={doc} stamp={o} />}
             </>
         );
     } else if (sel.kind === 'token') {
@@ -775,8 +1034,10 @@ export function SidePanel() {
     const style = styleOf(doc.styleId);
     let palette: ReactElement | null = null;
     switch (ui.tool) {
-        case 'paint': case 'fill': palette = <TerrainPalette style={style} />; break;
+        case 'paint': case 'fill': case 'shape': palette = <TerrainPalette style={style} />; break;
         case 'stamp': palette = <LandmarkPalette style={style} />; break;
+        case 'build': palette = doc.kind === 'world' ? null : <BuildPalette />; break;
+        case 'room': palette = doc.kind === 'interior' ? <RoomPanel /> : null; break;
         case 'path': palette = <PathPalette style={style} />; break;
         case 'token': palette = <TokenPalette style={style} />; break;
         case 'label': palette = <LabelPalette />; break;

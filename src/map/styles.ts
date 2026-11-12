@@ -1,6 +1,6 @@
 import type { LabelRole, PathKind, StyleId } from './types';
 
-/* The four looks a map can be drawn in.
+/* The five looks a map can be drawn in.
 
    A style is data plus the few renderer switches in render/terrain.ts, so a new
    one is mostly a new entry here. What a style decides:
@@ -37,6 +37,9 @@ export interface PathLook {
     widthScale: number;
     /** Rivers taper from their source. */
     taper?: boolean;
+    /** A tapered river drawn in ink in this colour: banks, a shaded inner
+        line and strokes for the current (`riverInkD`), not a casing. */
+    engraved?: string;
     cap: CanvasLineCap;
 }
 
@@ -78,6 +81,28 @@ export interface MapStyle {
     label: Record<LabelRole, { font: string; size: number; weight: number; color: string; halo: string; italic?: boolean; upper?: boolean; spacing?: number }>;
     /** Route-number badge. */
     badge: { fill: string; text: string; border: string };
+    /** Aged paper laid over the ground: stains, burnt edges, folds and a
+        grain, multiplied in — see render/paper.ts. */
+    paper?: { stain: string; burn: string; grain: number; creases: boolean };
+    /** How a landmark with no art of its own is drawn: the coloured disc, or
+        an ink shield with a pale glyph, as an old atlas marks its cities. */
+    marker?: 'disc' | 'shield';
+    /** Tokens drawn into the map rather than over it: the picture filtered
+        (`filter`, a CSS/canvas filter), a `disc` behind it, the token's own
+        colour mixed toward `tint` by `mix` for the ring, an `ink` hairline
+        round it, and the name lettered in `font` on a `halo` instead of a pill. */
+    token?: { filter: string; disc: string; tint: string; mix: number; ink: string; font: string; halo: string };
+}
+
+/** `a` mixed toward `b` by `k` (0..1), both #rrggbb. */
+function mixHex(a: string, b: string, k: number): string {
+    const ch = (h: string, i: number) => parseInt(h.replace('#', '').slice(i, i + 2), 16) || 0;
+    return '#' + [0, 2, 4].map((i) => Math.round(ch(a, i) * (1 - k) + ch(b, i) * k).toString(16).padStart(2, '0')).join('');
+}
+
+/** The colour a token's ring is drawn in, under this style. */
+export function tokenRing(style: MapStyle, color: string): string {
+    return style.token ? mixHex(color, style.token.tint, style.token.mix) : color;
 }
 
 const HAND_FONT = "'IM Fell English', 'Palatino Linotype', Georgia, serif";
@@ -117,6 +142,7 @@ const handdrawn: MapStyle = {
         'tall-grass': { fill: '#cbd29a', pattern: 'tall-tussocks', ink: '#5f7a34', edge: { color: '#6f7a3e88', width: 1 } },
         'forest': { fill: '#b8c291', pattern: 'forest-line', ink: HAND_INK, edge: { color: '#3b2f2499', width: 1.2 } },
         'jungle': { fill: '#a3b484', pattern: 'jungle-line', ink: '#2f3b24', edge: { color: '#3b2f2499', width: 1.2 } },
+        'hills': { fill: '#d4d29c', pattern: 'hills', ink: '#5f6e38', edge: { color: '#6f7a3e88', width: 1 } },
         'desert': { fill: '#ecd6a0', pattern: 'dunes', ink: '#b08a4e', edge: { color: '#b08a4e99', width: 1 } },
         'badlands': { fill: '#dbb38e', pattern: 'shrubs', ink: '#a8784e', edge: { color: '#8e5a3a99', width: 1 } },
         'tundra': { fill: '#e4e3d4', pattern: 'bare-trees', ink: '#6e665a', edge: { color: '#8a908f88', width: 1 } },
@@ -143,6 +169,77 @@ const handdrawn: MapStyle = {
         small: { font: HAND_FONT, size: 0.45, weight: 400, color: HAND_INK, halo: '#efe3c2aa', italic: true },
     },
     badge: { fill: '#f3e8cc', text: HAND_INK, border: HAND_INK },
+};
+
+/* An old atlas of the realm: sepia ink on stained parchment, mountains
+   hatched in ranges, coasts lined in ink, red only for borders and towns.
+   The fills stay within a narrow band of paper tones, nudged towards green
+   or grey just enough to tell the terrains apart. */
+const OLD_INK = '#4a3826';
+const OLD_RED = '#7e2a1c';
+const OLD_FONT = "'Uncial Antiqua', 'IM Fell English', Georgia, serif";
+
+const ancient: MapStyle = {
+    id: 'ancient', name: 'Ancient', folder: 'Ancient', icon: 'fa-chess-rook',
+    edgeMode: 'smooth',
+    backdrop: '#1d160f', frame: { color: OLD_INK, width: 4 },
+    coast: { color: '#5a43281a', widths: [1.2, 0.8, 0.45, 0.2] },
+    depth: {
+        steps: [0.22, 0.45, 0.72, 1.05],
+        colors: ['#e9dcb81c', '#00000000', '#00000000', '#00000000', '#00000000'],
+        line: { color: '#4a382659', width: 1 },
+    },
+    line: { color: OLD_INK, width: 1.6 },
+    shore: { color: '#4a3826cc', width: 2 },
+    pixelated: false,
+    grid: '#4a382640',
+    marker: 'shield',
+    token: {
+        filter: 'sepia(0.7) saturate(0.7) contrast(0.95)', disc: '#eadcb8e8', tint: '#8a6a3c', mix: 0.55,
+        ink: OLD_INK, font: HAND_FONT, halo: '#eadcb8',
+    },
+    paper: { stain: '#8a6a3c', burn: '#3b2814', grain: 0.5, creases: true },
+    terrain: {
+        'clouds': { fill: '#e6dcc0', pattern: 'engr-clouds', ink: '#8a7a5e' },
+        'deep-sea': { fill: '#b9b394', edge: { color: '#4a382655', width: 1 } },
+        'sea': { fill: '#c6bf9e' },
+        'shallows': { fill: '#cfc6a2', pattern: 'engr-water', ink: '#9a9070' },
+        'lake': { fill: '#bdb795', pattern: 'engr-water', ink: '#6f6750', edge: { color: '#4a382677', width: 1 } },
+        'river': { fill: '#bdb795', pattern: 'engr-water', ink: '#6f6750', edge: { color: '#4a382677', width: 1 } },
+        'swamp': { fill: '#c2b98e', pattern: 'engr-swamp', ink: '#4a4630', edge: { color: '#5c5a3677', width: 1 } },
+        'beach': { fill: '#e0d0a4', pattern: 'engr-stipple', ink: '#9a875e', edge: { color: '#a8956a88', width: 1 } },
+        'grassland': { fill: '#d8c79c' },
+        'flower-field': { fill: '#dcc8a0', pattern: 'engr-flowers', ink: '#5e4636', edge: { color: '#7a5a4a66', width: 1 } },
+        'tall-grass': { fill: '#c4b682', pattern: 'engr-grass', ink: '#4f4a2c', edge: { color: '#5e563466', width: 1 } },
+        'forest': { fill: '#c6bd8c', pattern: 'engr-forest', ink: OLD_INK, edge: { color: '#4a382688', width: 1.2 } },
+        'jungle': { fill: '#bdb784', pattern: 'engr-jungle', ink: '#3a3420', edge: { color: '#4a382688', width: 1.2 } },
+        'hills': { fill: '#d2c392', pattern: 'engr-hills', ink: OLD_INK, edge: { color: '#5e563466', width: 1 } },
+        'desert': { fill: '#e2cd9a', pattern: 'engr-dunes', ink: '#6e5432', edge: { color: '#9a7c4c88', width: 1 } },
+        'badlands': { fill: '#d6b88c', pattern: 'engr-mesas', ink: '#5e4028', edge: { color: '#7a543488', width: 1 } },
+        'tundra': { fill: '#e0d6bc', pattern: 'engr-tundra', ink: '#4e4232', edge: { color: '#6a5c4866', width: 1 } },
+        'snow': { fill: '#ece4cf', pattern: 'engr-drifts', ink: '#6a5e4c', edge: { color: '#7a6c5866', width: 1 } },
+        'mountain': { fill: '#d2bf94', pattern: 'hatch-peaks', ink: OLD_INK, edge: { color: '#4a382677', width: 1.2 } },
+        'snow-mountain': { fill: '#ddd2b6', pattern: 'hatch-snow-peaks', ink: OLD_INK, edge: { color: '#4a382677', width: 1.2 } },
+        'volcanic': { fill: '#c4aa86', pattern: 'engr-volcanoes', ink: OLD_INK, edge: { color: '#5a3e2a88', width: 1.2 } },
+        'cave-floor': { fill: '#c8b490', pattern: 'engr-rocks', ink: '#4e3e2c', edge: { color: '#5e4c3688', width: 1.2 } },
+        'road': { fill: '#d6c194', edge: { color: '#4a382688', width: 1 } },
+        'town-paving': { fill: '#d4c29c', pattern: 'engr-cobbles', ink: '#7a6a4e', edge: { color: '#8a7a5c88', width: 1 } },
+    },
+    paths: {
+        'river': { color: '#c4bf9f', engraved: OLD_INK, widthScale: 1.3, taper: true, cap: 'round' },
+        'road': { color: OLD_INK, widthScale: 0.12, cap: 'round' },
+        'route': { color: OLD_INK, widthScale: 0.16, cap: 'round' },
+        'trail': { color: OLD_INK, dash: [0.01, 3], widthScale: 0.12, cap: 'round' },
+        'border': { color: OLD_RED, dash: [2.6, 1.6], widthScale: 0.22, cap: 'butt' },
+        'sea-route': { color: '#4a3826b0', dash: [2, 2.4], widthScale: 0.1, cap: 'round' },
+    },
+    label: {
+        region: { font: OLD_FONT, size: 1.5, weight: 400, color: OLD_INK, halo: '#e6d6ae66', spacing: 0.12 },
+        town: { font: OLD_FONT, size: 0.75, weight: 400, color: OLD_RED, halo: '#e6d6ae88' },
+        route: { font: HAND_FONT, size: 0.6, weight: 400, color: OLD_INK, halo: '#e6d6ae66', italic: true },
+        small: { font: HAND_FONT, size: 0.45, weight: 400, color: OLD_INK, halo: '#e6d6ae66', italic: true },
+    },
+    badge: { fill: '#e6d6ae', text: OLD_INK, border: OLD_INK },
 };
 
 const ANIME_LINE = '#24324d';
@@ -175,6 +272,7 @@ const anime: MapStyle = {
         'tall-grass': { fill: '#6cbf58', pattern: 'tall-tussocks', ink: '#3a8f3a', edge: { color: '#3f8a3f', width: 2 } },
         'forest': { fill: '#40a04a', pattern: 'forest-fill', ink: '#2f8040', edge: { color: '#2a7a38', width: 2 } },
         'jungle': { fill: '#2f8c4c', pattern: 'jungle-fill', ink: '#237038', edge: { color: '#1e6a34', width: 2 } },
+        'hills': { fill: '#7cc862', pattern: 'hills-fill', ink: '#58a844', edge: { color: '#3f8a3f', width: 2 } },
         'desert': { fill: '#f4d26e', pattern: 'blobs', ink: '#ecc25a', edge: { color: '#c89a3a', width: 2 } },
         'badlands': { fill: '#dd8e56', pattern: 'shrubs', ink: '#b06a38', edge: { color: '#9a5a2e', width: 2 } },
         'tundra': { fill: '#d4eaf0', pattern: 'bare-trees', ink: '#6a6660', edge: { color: '#8ab4c4', width: 2 } },
@@ -227,6 +325,7 @@ const townmap: MapStyle = {
         'tall-grass': { fill: '#70b058' },
         'forest': { fill: '#489048' },
         'jungle': { fill: '#387840' },
+        'hills': { fill: '#a0c070' },
         'desert': { fill: '#e0c070' },
         'badlands': { fill: '#c89060' },
         'tundra': { fill: '#c8e0e8' },
@@ -278,6 +377,7 @@ const overworld: MapStyle = {
         'tall-grass': { fill: '#58a838', pattern: 'px-tallgrass', ink: '#387820' },
         'forest': { fill: '#387830', pattern: 'px-forest', ink: '#58a040' },
         'jungle': { fill: '#286028', pattern: 'px-jungle', ink: '#408838' },
+        'hills': { fill: '#78c850', pattern: 'px-hills', ink: '#60b040' },
         'desert': { fill: '#e8c878', pattern: 'px-sand', ink: '#d0a858' },
         'badlands': { fill: '#c88858', pattern: 'px-shrubs', ink: '#98603a' },
         'tundra': { fill: '#d0e0e0', pattern: 'px-bare-trees', ink: '#605850' },
@@ -306,7 +406,7 @@ const overworld: MapStyle = {
     badge: { fill: '#f8f8f8', text: '#202020', border: '#202020' },
 };
 
-export const MAP_STYLES: MapStyle[] = [handdrawn, anime, townmap, overworld];
+export const MAP_STYLES: MapStyle[] = [handdrawn, ancient, anime, townmap, overworld];
 
 export const STYLE_BY_ID = new Map(MAP_STYLES.map((s) => [s.id, s]));
 

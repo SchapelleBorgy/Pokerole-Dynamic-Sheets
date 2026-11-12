@@ -1,17 +1,22 @@
-import { styleOf } from '../styles';
+import { styleOf, tokenRing } from '../styles';
 import type { MapStyle } from '../styles';
-import { landmarkOf } from '../landmarks';
+import { fillerTerrain, landmarkOf } from '../landmarks';
+import { fillerCanvas } from '../fillerStamps';
 import { TERRAINS } from '../terrain';
 import { landmarkChain, markerChain, pokemonTokenChain, terrainTextureUrl } from '../sprites';
-import { midpoint, polygonD, sampleCurve, smoothPathD, taperOutline } from '../geometry';
+import { midpoint, polygonD, riverInkD, sampleCurve, smoothPathD, taperOutline } from '../geometry';
 import type { Pt } from '../geometry';
 import { typeColors, TYPE_ICONS } from '../../lib/themeTables';
 import { CELL } from './patterns';
-import { fogImage, fogSealImage } from './fog';
+import { fogImage } from './fog';
 import { drawSketch } from '../sketch';
 import { buildGeometry, drawGrid, drawTerrain } from './terrain';
+import { loadPicture } from '../picture';
+import { depthOrder, drawPlaced, spriteBox } from '../world/placed';
+import { drawRoom } from '../world/room';
+import { lookOf } from '../world/looks';
 import type { TextureSource } from './terrain';
-import type { MapDoc, MapLabel, MapPath, MapStamp, MapToken } from '../types';
+import type { MapDoc, MapLabel, MapPath, MapPlaced, MapStamp, MapToken } from '../types';
 import {
     applyLabelTransform, fontOf, isPlain, labelType, layoutGlyphs, lineBaselines, measureWith, plainLineX, shadowOf,
 } from '../labelText';
@@ -36,9 +41,6 @@ export interface ExportOptions {
     tokens: boolean;
     /** The fog of war, over everything else. */
     fog?: boolean;
-    /** Put every sample under full-strength fog back at 100% after the blur
-        (see `fogSealImage`). The shared table's render always asks for it. */
-    sealFog?: boolean;
     /** The image format; PNG unless asked. */
     type?: 'image/png' | 'image/webp' | 'image/jpeg';
     quality?: number;
@@ -103,7 +105,21 @@ function drawPath(ctx: CanvasRenderingContext2D, p: MapPath, style: MapStyle): v
     const look = style.paths[p.kind];
     const w = Math.max(0.05, p.width * look.widthScale) * CELL;
     const casing = Math.max(2, w * 0.3);
-    if (look.taper) {
+    if (look.taper && look.engraved) {
+        const ws = look.widthScale;
+        const ink = riverInkD(p.points as Pt[], p.width * 0.25 * ws, p.width * ws, CELL);
+        const bank = Math.max(1.2, CELL * 0.05);
+        ctx.save();
+        ctx.fillStyle = look.color;
+        ctx.fill(new Path2D(ink.body));
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.strokeStyle = look.engraved;
+        ctx.globalAlpha = 0.7; ctx.lineWidth = bank * 0.55; ctx.stroke(new Path2D(ink.shade));
+        ctx.globalAlpha = 0.55; ctx.lineWidth = bank * 0.5; ctx.stroke(new Path2D(ink.flow));
+        ctx.globalAlpha = 0.8; ctx.lineWidth = bank * 0.45; ctx.stroke(new Path2D(ink.hatch));
+        ctx.globalAlpha = 1; ctx.lineWidth = bank; ctx.stroke(new Path2D(ink.banks));
+        ctx.restore();
+    } else if (look.taper) {
         const body = new Path2D(polygonD(taperOutline(sampleCurve(p.points as Pt[]), p.width * 0.25, p.width), CELL));
         if (look.casing) {
             ctx.fillStyle = look.casing;
@@ -202,7 +218,12 @@ function textAlongPath(ctx: CanvasRenderingContext2D, pts: Pt[], text: string, d
 async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapStyle, load: ImageLoader): Promise<boolean> {
     const def = landmarkOf(s.landmark);
     const px = s.size * CELL;
-    const art = await load(landmarkChain(style, s.landmark));
+    /* A single filler is the style's own marker, drawn here and now — at
+       the size it will be on the picture, so it stays sharp. */
+    const filler = fillerTerrain(s.landmark);
+    const drawn = filler ? fillerCanvas(style, filler, s.variant ?? 0, Math.min(2048, Math.ceil(px * 1.5))) : null;
+    const art = drawn ? { img: drawn.canvas, w: drawn.canvas.width, h: drawn.canvas.height }
+        : filler ? null : await load(landmarkChain(style, s.landmark));
     ctx.save();
     ctx.translate(s.x * CELL, s.y * CELL);
     ctx.rotate(s.rotation * Math.PI / 180);
@@ -213,6 +234,29 @@ async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapS
         if (s.flip) ctx.scale(-1, 1);
         ctx.imageSmoothingEnabled = !style.pixelated;
         ctx.drawImage(art.img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+    } else if (style.marker === 'shield') {
+        /* The same shield as .map-ph.shield, on its 100-unit box. */
+        const d = px * 0.86, u = (v: number) => (v - 50) / 100 * d;
+        const shield = (x0: number, x1: number, y0: number, mid: number, cx0: number, cy: number, tip: number) => {
+            const p = new Path2D();
+            p.moveTo(u(x0), u(y0)); p.lineTo(u(x1), u(y0)); p.lineTo(u(x1), u(mid));
+            p.bezierCurveTo(u(x1), u(cy), u(100 - cx0), u(tip - 11), u(50), u(tip));
+            p.bezierCurveTo(u(cx0), u(tip - 11), u(x0), u(cy), u(x0), u(mid));
+            p.closePath();
+            return p;
+        };
+        ctx.save();
+        ctx.shadowColor = '#0006'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
+        ctx.fillStyle = '#3a2b1c';
+        ctx.fill(shield(12, 88, 5, 44, 29, 69, 96));
+        ctx.restore();
+        ctx.strokeStyle = '#eadcb8';
+        ctx.lineWidth = d * 0.03;
+        ctx.stroke(shield(18, 82, 11, 44, 32, 65, 89));
+        ctx.save();
+        if (s.flip) ctx.scale(-1, 1);
+        glyph(ctx, def.icon, 0, -d * 0.06, px * 0.36, '#eadcb8');
         ctx.restore();
     } else {
         const r = px * 0.39;
@@ -232,14 +276,16 @@ async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapS
         const d = px * 0.3, cx = px / 2 - px * 0.04 - d / 2, cy = -px / 2 + px * 0.04 + d / 2;
         ctx.beginPath();
         ctx.arc(cx, cy, d / 2, 0, Math.PI * 2);
-        ctx.fillStyle = typeColors[s.type];
+        ctx.fillStyle = tokenRing(style, typeColors[s.type]);
         ctx.fill();
-        ctx.strokeStyle = '#fff';
+        ctx.strokeStyle = style.token?.halo ?? '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
-        glyph(ctx, TYPE_ICONS[s.type] || 'fa-circle', cx, cy, px * 0.16, '#fff');
+        glyph(ctx, TYPE_ICONS[s.type] || 'fa-circle', cx, cy, px * 0.16, style.token?.halo ?? '#fff');
     }
-    if (s.label) {
+    /* A label shown only on hover has no place in a picture. Several lines
+       are stacked as the page stacks them, 1.1 apart. */
+    if (s.label && s.labelShow !== 'hover') {
         const lab = style.label.small;
         const size = Math.max(10, lab.size * CELL * 1.1);
         ctx.font = `${lab.italic ? 'italic ' : ''}${lab.weight} ${size}px ${lab.font}`;
@@ -248,12 +294,13 @@ async function drawStamp(ctx: CanvasRenderingContext2D, s: MapStamp, style: MapS
         ctx.lineJoin = 'round';
         ctx.strokeStyle = lab.halo;
         ctx.lineWidth = size * 0.3;
-        ctx.strokeText(s.label, 0, px / 2);
+        const lines = s.label.split('\n');
+        lines.forEach((line, i) => ctx.strokeText(line, 0, px / 2 + i * size * 1.1));
         ctx.fillStyle = lab.color;
-        ctx.fillText(s.label, 0, px / 2);
+        lines.forEach((line, i) => ctx.fillText(line, 0, px / 2 + i * size * 1.1));
     }
     ctx.restore();
-    return !!art;
+    return !!art || !!filler;
 }
 
 /* ------------------------------------------------------------ labels */
@@ -333,15 +380,18 @@ async function drawToken(ctx: CanvasRenderingContext2D, t: MapToken, style: MapS
         ? pokemonTokenChain(t.image).map((c) => c.url)
         : markerChain(style, t.kind === 'trainer' ? 'trainer' : 'wild');
     const art = await load(chain);
-    const inner = px / 2 - ring;
+    const look = style.token;
+    const color = tokenRing(style, t.color);
+    const ringW = look ? Math.max(2, px * 0.05) : ring;
+    const inner = px / 2 - ringW;
 
     ctx.save();
-    ctx.shadowColor = '#0007';
-    ctx.shadowBlur = 6;
-    ctx.shadowOffsetY = 2;
+    ctx.shadowColor = look ? '#0005' : '#0007';
+    ctx.shadowBlur = look ? 3 : 6;
+    ctx.shadowOffsetY = look ? 1 : 2;
     ctx.beginPath();
     ctx.arc(x, y, px / 2, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffffd9';
+    ctx.fillStyle = look ? look.disc : '#ffffffd9';
     ctx.fill();
     ctx.restore();
 
@@ -351,6 +401,7 @@ async function drawToken(ctx: CanvasRenderingContext2D, t: MapToken, style: MapS
     ctx.clip();
     if (art) {
         ctx.imageSmoothingEnabled = !style.pixelated;
+        if (look) ctx.filter = look.filter;
         const d = inner * 2;
         if (/BoxSprites/.test(art.url)) {
             /* A Box sprite is a whole body in a square. The page frames it
@@ -367,19 +418,39 @@ async function drawToken(ctx: CanvasRenderingContext2D, t: MapToken, style: MapS
             ctx.drawImage(art.img, x - w / 2, y - h / 2, w, h);
         }
     } else {
-        ctx.fillStyle = t.color;
+        ctx.fillStyle = color;
         ctx.fillRect(x - inner, y - inner, inner * 2, inner * 2);
         glyph(ctx, t.kind === 'trainer' ? 'fa-user' : 'fa-question', x, y, px * 0.45, '#fff');
     }
     ctx.restore();
 
     ctx.beginPath();
-    ctx.arc(x, y, px / 2 - ring / 2, 0, Math.PI * 2);
-    ctx.strokeStyle = t.color;
-    ctx.lineWidth = ring;
+    ctx.arc(x, y, px / 2 - ringW / 2, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = ringW;
     ctx.stroke();
+    if (look) {
+        ctx.beginPath();
+        ctx.arc(x, y, px / 2 + 0.5, 0, Math.PI * 2);
+        ctx.strokeStyle = look.ink;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
 
-    if (t.name) {
+    if (t.name && look) {
+        /* Lettered like the map's labels: ink on a halo of paper. */
+        const size = Math.max(9, px * 0.26);
+        ctx.font = `italic 400 ${size}px ${look.font}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const ty = y + px / 2 + 2 + size * 0.675;
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = look.halo + 'cc';
+        ctx.lineWidth = size * 0.3;
+        ctx.strokeText(t.name, x, ty);
+        ctx.fillStyle = look.ink;
+        ctx.fillText(t.name, x, ty);
+    } else if (t.name) {
         const size = Math.max(9, px * 0.26);
         ctx.font = `600 ${size}px Outfit, sans-serif`;
         const w = ctx.measureText(t.name).width + size * 0.7;
@@ -394,6 +465,27 @@ async function drawToken(ctx: CanvasRenderingContext2D, t: MapToken, style: MapS
         ctx.fillText(t.name, x, y + px / 2 + 2 + h / 2);
     }
     return !!art;
+}
+
+/** A placed building's label, under its sprite, as the editor letters it. */
+function drawPlacedLabel(ctx: CanvasRenderingContext2D, p: MapPlaced): void {
+    const b = spriteBox(p);
+    const size = 12;
+    ctx.save();
+    ctx.font = `600 ${size}px Outfit, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.lineJoin = 'round';
+    const x = (b.x + b.w / 2) * CELL;
+    p.label!.split('\n').forEach((line, i) => {
+        const y = (b.y + b.h) * CELL + 4 + i * size * 1.1;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3.5;
+        ctx.strokeText(line, x, y);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(line, x, y);
+    });
+    ctx.restore();
 }
 
 /* ------------------------------------------------------------ the export */
@@ -427,12 +519,18 @@ export async function renderMapPng(doc: MapDoc, opts: ExportOptions, load: Image
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext('2d')!;
+    /* `willReadFrequently` puts the canvas in memory rather than on the GPU.
+       A GPU canvas draws the landmarks' icon glyphs, at this size and under
+       this transform, with a hairline along the edges of each glyph's box —
+       a square of thin lines round every landmark in the picture. The file
+       is read back off the canvas anyway, so nothing is lost. */
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     ctx.fillStyle = style.backdrop;
     ctx.fillRect(0, 0, w, h);
     ctx.setTransform(k, 0, 0, k, m, m);
 
-    drawTerrain(ctx, buildGeometry(doc, style), doc, style, textureSource);
+    const picture = doc.picture ? await loadPicture(doc.picture.id) : null;
+    drawTerrain(ctx, buildGeometry(doc, style), doc, style, textureSource, picture);
     if (opts.grid) {
         drawGrid(ctx, { ...doc, grid: { ...doc.grid, show: true, opacity: doc.grid.opacity || 0.5 } }, style, k,
             { x0: 0, y0: 0, x1: doc.cols, y1: doc.rows });
@@ -441,6 +539,27 @@ export async function renderMapPng(doc: MapDoc, opts: ExportOptions, load: Image
     let missing = 0;
     for (const p of doc.paths) drawPath(ctx, p, style);
     for (const s of doc.stamps) if (!(await drawStamp(ctx, s, style, load))) missing++;
+    /* A city or interior (World Builder): the look's filter over the ground
+       drawn so far, then its buildings and tokens together, back to front,
+       as the editor shows them — under the labels. */
+    const city = doc.kind !== 'world';
+    if (city) {
+        const filter = lookOf(doc.look).ground(doc.styleId);
+        if (filter) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.filter = filter;
+            ctx.globalCompositeOperation = 'copy';
+            ctx.drawImage(canvas, 0, 0);
+            ctx.restore();
+        }
+        if (doc.room) drawRoom(ctx, doc.room, CELL, doc.look, doc.cols, doc.rows);
+        for (const e of depthOrder(doc.placed, opts.tokens ? doc.tokens : [])) {
+            if (e.kind === 'placed') drawPlaced(ctx, e.obj, CELL, doc.look);
+            else if (!(await drawToken(ctx, e.obj, style, load))) missing++;
+        }
+        for (const p of doc.placed) if (p.label && p.labelShow !== 'hover') drawPlacedLabel(ctx, p);
+    }
     for (const l of doc.labels) drawLabel(ctx, l, style);
     if (doc.sketches.length) {
         /* Kept on the map: a fat line along the edge would otherwise spill
@@ -452,17 +571,12 @@ export async function renderMapPng(doc: MapDoc, opts: ExportOptions, load: Image
         for (const k of doc.sketches) drawSketch(ctx, k, CELL);
         ctx.restore();
     }
-    if (opts.tokens) for (const t of doc.tokens) if (!(await drawToken(ctx, t, style, load))) missing++;
+    if (opts.tokens && !city) for (const t of doc.tokens) if (!(await drawToken(ctx, t, style, load))) missing++;
     const fog = opts.fog ? fogImage(doc) : null;
     if (fog) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(fog, 0, 0, doc.cols * CELL, doc.rows * CELL);
-    }
-    const seal = opts.fog && opts.sealFog ? fogSealImage(doc) : null;
-    if (seal) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(seal, 0, 0, doc.cols * CELL, doc.rows * CELL);
     }
 
     const blob = await new Promise<Blob>((resolve, reject) => {

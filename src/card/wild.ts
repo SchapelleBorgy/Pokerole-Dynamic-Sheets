@@ -4,6 +4,7 @@ import { moveItem } from '../lib/reorder';
 import { WILD_MARKER, WILD_OPEN_KEY, wildSheetKey } from './cardContext';
 import type { CardSheet } from './types';
 import type { PokedexEntry } from '../data/types';
+import { HOMEBREW_FIELD, adoptHomebrew, homebrewFor } from '../data/homebrew';
 
 /* Wild Pokémon: sheets that belong to no trainer.
 
@@ -28,7 +29,8 @@ export interface WildOpenEntry {
 }
 
 export function wildPayload(p: PokedexEntry, sheet: CardSheet): WildPayload {
-    return { [WILD_MARKER]: true, dexId: p._id, sheet };
+    const homebrew = homebrewFor([p._id]);
+    return { [WILD_MARKER]: true, dexId: p._id, sheet, ...(homebrew.length ? { [HOMEBREW_FIELD]: homebrew } : null) };
 }
 
 /** Named after the nickname when there is one — several wild Rattata in an
@@ -145,6 +147,7 @@ export async function stashWildSheet(
     data: WildPayload | null, sourceName?: string,
 ): Promise<string | null> {
     if (!data || !data[WILD_MARKER] || !data.dexId) return null;
+    adoptHomebrew(data[HOMEBREW_FIELD]);
     const wid = newWildId(data.dexId);
 
     /* A file reached through a picker carries no writable handle, so drop

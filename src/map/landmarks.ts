@@ -1,3 +1,4 @@
+import { TERRAIN_BY_SLUG } from './terrain';
 /* The landmarks a map can be stamped with.
 
    The slug is the contract with the art: a landmark's sprite is the file
@@ -116,7 +117,26 @@ export const LANDMARKS: LandmarkDef[] = [
 export const LANDMARK_BY_SLUG = new Map(LANDMARKS.map((l) => [l.slug, l]));
 
 /** A stamp whose slug this version does not know still draws — as itself. */
+/** A single filler is stamped as `filler:<terrain slug>` — see fillerStamps.ts. */
+export const FILLER_PREFIX = 'filler:';
+
+/** The terrain slug a single filler's landmark names, or null for an
+    ordinary landmark. */
+export function fillerTerrain(landmark: string): string | null {
+    if (!landmark.startsWith(FILLER_PREFIX)) return null;
+    const slug = landmark.slice(FILLER_PREFIX.length);
+    return TERRAIN_BY_SLUG.has(slug) ? slug : null;
+}
+
+/** The size a single filler is placed at, in cells. */
+export const FILLER_SIZE = 2;
+
 export function landmarkOf(slug: string): LandmarkDef {
+    const filler = fillerTerrain(slug);
+    if (filler) {
+        const t = TERRAIN_BY_SLUG.get(filler)!;
+        return { slug, name: t.name + ' (filler)', group: 'nature', icon: t.icon, color: '#6a7a4a', size: FILLER_SIZE };
+    }
     return LANDMARK_BY_SLUG.get(slug) ?? {
         slug, name: slug, group: 'furniture', icon: 'fa-question', color: '#777', size: 1.5,
     };

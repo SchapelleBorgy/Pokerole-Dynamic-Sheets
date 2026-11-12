@@ -18,15 +18,16 @@
        screen, which also checks it is their turn. */
 
 import { COMBAT_BEAT_MS, COMBAT_LOST_MS, openCombatLink, parseCombatLink } from '../lib/combatLink';
-import type { CombatLinkMessage, PcOp } from '../lib/combatLink';
+import type { CombatLinkMessage, LinkMember, PcOp } from '../lib/combatLink';
 import { mutateWorkingTrainer, readWorking } from '../gm/workingSet';
 import { normalizeStatus } from '../gm/ailments';
 import type { TrainerState } from '../state/types';
 import { slimMon, slimTrainer } from './slim';
 import type { CharKey, SlimMon, SlimTrainer } from './slim';
 import { randomId } from './protocol';
-import type { Body, TurnOp, WireTurns } from './protocol';
+import type { Body, TurnOp, WireMember, WireTurns } from './protocol';
 import type { TableApi } from './link';
+import { putSheetMods, putTrainerMods } from '../lib/combatMods';
 
 export interface CombatView {
     /** The fight on the table, or null. On the GM's table every count is in
@@ -80,12 +81,18 @@ function slotOf(t: TrainerState, key: string, uids: Record<string, string>): num
 }
 
 /** The strip as players get it: the GM's own combatants carry no counts. */
+/** Who is at the table, for the GM screen: name and chosen colour. */
+function linkMembers(members: WireMember[]): LinkMember[] {
+    return members.map((m) => (m.color === undefined ? { id: m.id, name: m.name } : { id: m.id, name: m.name, color: m.color }));
+}
+
 function forPlayers(t: WireTurns | null): WireTurns | null {
     if (!t) return null;
     return {
         ...t,
         order: t.order.map((e) => (e.own ? e : {
             id: e.id, name: e.name, img: e.img, own: '', ck: '', done: e.done, out: e.out,
+            ...(e.acted !== undefined ? { acted: e.acted } : {}),
         })),
     };
 }
@@ -138,12 +145,14 @@ export class CombatShare {
         this.api.changed();
     }
 
-    end(): void {
+    /** `quiet`: the table moved to another tab rather than closing, so the
+        GM screen is not told goodbye — it would drop the fight's link. */
+    end(quiet = false): void {
         if (this.beat !== null) clearInterval(this.beat);
         if (this.pump !== null) clearInterval(this.pump);
         this.beat = this.pump = null;
         if (this.link) {
-            this.post({ t: 'bye' });
+            if (!quiet) this.post({ t: 'bye' });
             this.link.removeEventListener('message', this.onLink);
             this.link.close();
             this.link = null;
@@ -162,7 +171,7 @@ export class CombatShare {
     }
 
     private beatNow(): void {
-        this.post({ t: 'host', table: this.lobby, members: this.api.members().map((m) => ({ id: m.id, name: m.name })) });
+        this.post({ t: 'host', table: this.lobby, members: linkMembers(this.api.members()) });
         this.post({ t: 'want' });
         const linked = Date.now() - this.gmSeenAt < COMBAT_LOST_MS;
         if (linked !== this.view.linked) {
@@ -176,7 +185,7 @@ export class CombatShare {
         if (!m) return;
         if (m.t === 'ping') {
             /* Answered from here, not from the timer: see COMBAT_LOST_MS. */
-            this.post({ t: 'host', table: this.lobby, members: this.api.members().map((x) => ({ id: x.id, name: x.name })) });
+            this.post({ t: 'host', table: this.lobby, members: linkMembers(this.api.members()) });
             return;
         }
         if (m.t === 'turns') {
@@ -223,6 +232,11 @@ export class CombatShare {
     forget(member: string): void {
         this.sheets.delete(member);
         this.owed.delete(member);
+    }
+
+    /** Whether a character of `member`'s is on the fight's strip. */
+    onStrip(member: string): boolean {
+        return !!this.view.turns?.order.some((e) => e.own === member);
     }
 
     /** A player's sheet for one of their characters. */
@@ -276,7 +290,7 @@ export class CombatShare {
         const entry = t ? t.order.find((e) => e.id === body.id) : null;
         if (!t || !entry || entry.own !== member) return;
         if ((body.op === 'pass' || body.op === 'delay') && t.cur !== body.id) return;
-        this.post({ t: 'act', member, op: body.op, pid: body.id, after: body.after ?? null });
+        this.post({ t: 'act', member, op: body.op, pid: body.id, after: body.after ?? null, move: body.mv ?? null });
     }
 
     private onGmOp(member: string, key: CharKey, op: PcOp): void {
@@ -372,9 +386,9 @@ export class CombatShare {
         this.api.changed();
     }
 
-    act(op: TurnOp, id: string, after?: string): void {
+    act(op: TurnOp, id: string, after?: string, move?: string): void {
         if (this.host) return;
-        void this.api.publish({ k: 'turn', op, id, ...(after ? { after } : {}) });
+        void this.api.publish({ k: 'turn', op, id, ...(after ? { after } : {}), ...(op === 'acc' && move ? { mv: move } : {}) });
     }
 
     /** Every character of mine in the fight (or on its way in) whose sheet
@@ -423,6 +437,10 @@ export class CombatShare {
             if (body.hp !== undefined) target.hp = body.hp;
             if (body.will !== undefined) target.will = body.will;
             if (body.status !== undefined) target.status = normalizeStatus(body.status);
+            if (body.mods !== undefined) {
+                if (body.key === 't') putTrainerMods(target, body.mods);
+                else putSheetMods(target, body.mods);
+            }
         });
         b.acks = { ...b.acks, [body.key]: body.oid };
         saveBinding(b);

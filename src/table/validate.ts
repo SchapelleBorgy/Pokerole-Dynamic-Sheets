@@ -10,11 +10,13 @@
    reason for a nickname to contain a bidi override and every reason for someone
    to try. */
 
-import { LIMITS } from './protocol';
-import { KIT_ROLLS } from './protocol';
+import { FILE_MIME_RE, KIT_ROLLS, LIMITS } from './protocol';
 import { UNSAFE_TEXT } from './text';
+import { MAX_COLOR } from './colors';
 import { IMAGE_RE, isCharKey, parseSlimMon, parseSlimTrainer, parseStatus } from './slim';
 import type { CharKey } from './slim';
+import { parseMegaRules } from '../lib/megaRules';
+import { parseMods } from '../lib/combatMods';
 import type {
     Body, ChannelId, ChannelState, Fade, Inner, KitRoll, RollExtras, TrackLoad, WireClaim, WireCombatant, WireFight,
     WireFile, WireGmRoll, WireKit, WireKitMove, WireMapImage, WireMember, WireRoll, WireTrack, WireTurnEntry, WireTurns,
@@ -60,9 +62,11 @@ export function cleanText(v: unknown, max: number): string {
     return v.normalize('NFC').replace(UNSAFE_TEXT, '').trim().slice(0, max);
 }
 
-/** A short opaque id — request ids, roll ids, session ids. */
+/** A short opaque id — request ids, roll ids, session ids. Never one of the
+    prototype names: ids end up as object keys here and there, and `__proto__`
+    as a key is a setter, not a field. Nothing this app makes is spelled so. */
 function idText(v: unknown): string | null {
-    return typeof v === 'string' && /^[A-Za-z0-9_-]{1,48}$/.test(v) ? v : null;
+    return typeof v === 'string' && /^[A-Za-z0-9_-]{1,48}$/.test(v) && !POISON_KEYS.has(v) ? v : null;
 }
 
 /** A finite number in range; fractions allowed. */
@@ -108,6 +112,11 @@ function parseExtras(raw: Record<string, unknown>): RollExtras | undefined {
         if (n === null) return undefined;
         out.need = n;
     }
+    if (raw.crit !== undefined) {
+        const c = int(raw.crit, 0, LIMITS.MAX_CRIT);
+        if (c === null || out.need === undefined) return undefined;
+        out.crit = c;
+    }
     /* A sum roll counts no successes, so there is nothing for pain to strike
        or a target to be measured against. */
     if (out.bonus !== undefined && (out.pain !== undefined || out.need !== undefined)) return undefined;
@@ -116,7 +125,7 @@ function parseExtras(raw: Record<string, unknown>): RollExtras | undefined {
 
 export function parseRoll(raw: unknown): WireRoll | null {
     if (!isRecord(raw)) return null;
-    if (!exactly(raw, ['id', 'label', 'vals', 'total', 'succ', 'net', 't', 'who', 'note', 'bonus', 'pain', 'need'])) return null;
+    if (!exactly(raw, ['id', 'label', 'vals', 'total', 'succ', 'net', 't', 'who', 'note', 'bonus', 'pain', 'need', 'crit'])) return null;
 
     const id = idText(raw.id);
     if (!id) return null;
@@ -161,11 +170,13 @@ export function parseRoll(raw: unknown): WireRoll | null {
 
 function parseMember(raw: unknown): WireMember | null {
     if (!isRecord(raw)) return null;
-    if (!exactly(raw, ['id', 'name', 'host'])) return null;
+    if (!exactly(raw, ['id', 'name', 'host', 'color'])) return null;
     const id = fingerprintText(raw.id);
     const name = cleanText(raw.name, LIMITS.MAX_NAME);
     if (!id || !name || typeof raw.host !== 'boolean') return null;
-    return { id, name, host: raw.host };
+    if (raw.color === undefined) return { id, name, host: raw.host };
+    const color = int(raw.color, 0, MAX_COLOR);
+    return color === null ? null : { id, name, host: raw.host, color };
 }
 
 /* ---------------------------------------------------------------- combat */
@@ -352,13 +363,13 @@ export function parseFile(raw: unknown): WireFile | null {
     /* The count must be the one the size implies, or a reference could ask
        for parts that do not exist, or stop short of the end. */
     if (parts !== Math.max(1, Math.ceil(size / 1_000_000))) return null;
-    if (typeof raw.mime !== 'string'
-        || !/^((audio|image|video)\/[a-z0-9.+-]{1,40}|application\/octet-stream)$/.test(raw.mime)) return null;
+    if (typeof raw.mime !== 'string' || !FILE_MIME_RE.test(raw.mime)) return null;
     return { id: raw.id, sha: raw.sha, size, parts, mime: raw.mime };
 }
 
 function parseTrack(raw: unknown): WireTrack | null {
-    if (!isRecord(raw) || !exactly(raw, ['id', 'title', 'kind', 'file', 'yt', 'dur'])) return null;
+    if (!isRecord(raw) || !exactly(raw, ['id', 'title', 'kind', 'file', 'yt', 'dur', 'pre'])) return null;
+    if (raw.pre !== undefined && (raw.pre !== true || raw.kind !== 'file')) return null;
     const id = idText(raw.id);
     /* '' is a title the GM has not revealed. */
     const title = raw.title === '' ? '' : cleanText(raw.title, LIMITS.MAX_TITLE);
@@ -368,7 +379,7 @@ function parseTrack(raw: unknown): WireTrack | null {
         if (raw.yt !== undefined) return null;
         const file = parseFile(raw.file);
         if (!file || !/^(audio|video)\/|^application\/octet-stream$/.test(file.mime)) return null;
-        return { id, title, kind: 'file', file, dur };
+        return raw.pre ? { id, title, kind: 'file', file, dur, pre: true } : { id, title, kind: 'file', file, dur };
     }
     if (raw.kind === 'yt') {
         if (raw.file !== undefined) return null;
@@ -413,23 +424,31 @@ function parseMapImage(raw: unknown): WireMapImage | null {
 }
 
 function parseTurnEntry(raw: unknown): WireTurnEntry | null {
-    if (!isRecord(raw) || !exactly(raw, ['id', 'name', 'img', 'own', 'ck', 'done', 'out', 'acted', 'eva', 'clash'])) return null;
+    if (!isRecord(raw) || !exactly(raw, ['id', 'name', 'img', 'own', 'ck', 'done', 'out', 'acted', 'eva', 'clash', 'used'])) return null;
     const id = idText(raw.id);
     const name = cleanText(raw.name, LIMITS.MAX_NAME * 2);
     if (!id || !name) return null;
     if (typeof raw.img !== 'string' || (raw.img !== '' && !IMAGE_RE.test(raw.img))) return null;
     if (typeof raw.done !== 'boolean' || typeof raw.out !== 'boolean') return null;
     const entry: WireTurnEntry = { id, name, img: raw.img, own: '', ck: '', done: raw.done, out: raw.out };
+    const acted = raw.acted === undefined ? undefined : int(raw.acted, 0, 5);
+    if (acted === null) return null;
     if (raw.own === '') {
-        /* The GM's own combatants carry nothing more. */
-        if (raw.ck !== '' || raw.acted !== undefined || raw.eva !== undefined || raw.clash !== undefined) return null;
-        return entry;
+        /* The GM's own combatants carry their action count and nothing more. */
+        if (raw.ck !== '' || raw.eva !== undefined || raw.clash !== undefined || raw.used !== undefined) return null;
+        return acted === undefined ? entry : { ...entry, acted };
     }
     const own = fingerprintText(raw.own);
-    const acted = int(raw.acted, 0, 5);
-    if (!own || !isCharKey(raw.ck) || acted === null) return null;
+    if (!own || !isCharKey(raw.ck) || acted === undefined) return null;
     if (typeof raw.eva !== 'boolean' || typeof raw.clash !== 'boolean') return null;
-    return { ...entry, own, ck: raw.ck, acted, eva: raw.eva, clash: raw.clash };
+    const out: WireTurnEntry = { ...entry, own, ck: raw.ck, acted, eva: raw.eva, clash: raw.clash };
+    if (raw.used !== undefined) {
+        if (!Array.isArray(raw.used) || raw.used.length > LIMITS.MAX_USED_MOVES) return null;
+        const used = raw.used.map((m) => cleanText(m, LIMITS.MAX_NOTE));
+        if (used.some((m) => !m)) return null;
+        out.used = used as string[];
+    }
+    return out;
 }
 
 function parseTurns(raw: unknown): WireTurns | null {
@@ -466,6 +485,55 @@ function idList(raw: unknown, max: number): string[] | null {
     return out;
 }
 
+/** A packed piece of a sheet (zpart.ts): base64url, under the frame's size.
+    What it holds is checked once it is unpacked, which is asynchronous. */
+function zText(v: unknown): string | null {
+    return typeof v === 'string' && v.length <= LIMITS.MAX_WIRE_CHARS && /^[A-Za-z0-9_-]+$/.test(v) ? v : null;
+}
+
+/** A team's six slots: each a Pokémon's key, or '' for an empty one. */
+function slotList(raw: unknown): string[] | null {
+    if (!Array.isArray(raw) || raw.length > LIMITS.TEAM_SLOTS) return null;
+    const out: string[] = [];
+    for (const v of raw) {
+        if (v === '') { out.push(''); continue; }
+        const id = idText(v);
+        if (!id || out.includes(id)) return null;
+        out.push(id);
+    }
+    return out;
+}
+
+/** Pieces by Pokémon key; every key must be on the team's slots. */
+function zMap(raw: unknown, order: string[] | null): Record<string, string> | null {
+    if (!isRecord(raw)) return null;
+    const keys = Object.keys(raw);
+    if (!keys.length || keys.length > LIMITS.TEAM_SLOTS) return null;
+    const out: Record<string, string> = {};
+    for (const k of keys) {
+        const z = zText(raw[k]);
+        if (!idText(k) || !z || (order && !order.includes(k))) return null;
+        out[k] = z;
+    }
+    return out;
+}
+
+/** An uncompressed P-256 point, base64url: 65 bytes, 87 characters. */
+function dhText(v: unknown): boolean {
+    return typeof v === 'string' && /^[A-Za-z0-9_-]{87}$/.test(v);
+}
+
+function memberList(raw: unknown): string[] | null {
+    if (!Array.isArray(raw) || raw.length > LIMITS.MAX_MEMBERS) return null;
+    const out: string[] = [];
+    for (const v of raw) {
+        const id = fingerprintText(v);
+        if (!id || out.includes(id)) return null;
+        out.push(id);
+    }
+    return out;
+}
+
 function driftValue(v: unknown): number | null | undefined {
     if (v === null) return null;
     const d = int(v, -3_600_000, 3_600_000);
@@ -477,9 +545,12 @@ export function parseBody(raw: unknown): Body | null {
 
     switch (raw.k) {
         case 'hello': {
-            if (!exactly(raw, ['k', 'name'])) return null;
+            if (!exactly(raw, ['k', 'name', 'color'])) return null;
             const name = cleanText(raw.name, LIMITS.MAX_NAME);
-            return name ? { k: 'hello', name } : null;
+            if (!name) return null;
+            if (raw.color === undefined) return { k: 'hello', name };
+            const color = int(raw.color, 0, MAX_COLOR);
+            return color === null ? null : { k: 'hello', name, color };
         }
         case 'roster': {
             if (!exactly(raw, ['k', 'members'])) return null;
@@ -493,7 +564,7 @@ export function parseBody(raw: unknown): Body | null {
             return { k: 'roster', members };
         }
         case 'request': {
-            if (!exactly(raw, ['k', 'rid', 'count', 'sides', 'note', 'bonus', 'pain', 'need'])) return null;
+            if (!exactly(raw, ['k', 'rid', 'count', 'sides', 'note', 'bonus', 'pain', 'need', 'crit'])) return null;
             const rid = idText(raw.rid);
             const count = int(raw.count, LIMITS.MIN_COUNT, LIMITS.MAX_COUNT);
             const sides = int(raw.sides, LIMITS.MIN_SIDES, LIMITS.MAX_SIDES);
@@ -576,6 +647,11 @@ export function parseBody(raw: unknown): Body | null {
             }
             return { k: 'combat', to, fights };
         }
+        case 'locked': {
+            if (!exactly(raw, ['k', 'id'])) return null;
+            const id = fingerprintText(raw.id);
+            return id ? { k: 'locked', id } : null;
+        }
         case 'library': {
             if (!exactly(raw, ['k', 'tracks'])) return null;
             if (!Array.isArray(raw.tracks) || raw.tracks.length > LIMITS.MAX_TRACKS) return null;
@@ -642,20 +718,27 @@ export function parseBody(raw: unknown): Body | null {
             if (rev === null || (raw.turns !== null && !turns)) return null;
             return { k: 'turns', rev, turns };
         }
+        case 'rules': {
+            if (!exactly(raw, ['k', 'mega'])) return null;
+            const mega = parseMegaRules(raw.mega);
+            return mega ? { k: 'rules', mega } : null;
+        }
         case 'pcop': {
-            if (!exactly(raw, ['k', 'to', 'key', 'oid', 'hp', 'will', 'status'])) return null;
+            if (!exactly(raw, ['k', 'to', 'key', 'oid', 'hp', 'will', 'status', 'mods'])) return null;
             const to = fingerprintText(raw.to);
             const oid = idText(raw.oid);
             if (!to || !oid || !isCharKey(raw.key)) return null;
             const hp = poolValue(raw.hp), will = poolValue(raw.will);
             const status = raw.status === undefined ? undefined : parseStatus(raw.status);
-            if (hp === null || will === null || status === null) return null;
-            if (hp === undefined && will === undefined && status === undefined) return null;
+            const mods = raw.mods === undefined ? undefined : parseMods(raw.mods);
+            if (hp === null || will === null || status === null || mods === null) return null;
+            if (hp === undefined && will === undefined && status === undefined && mods === undefined) return null;
             return {
                 k: 'pcop', to, key: raw.key, oid,
                 ...(hp !== undefined ? { hp } : {}),
                 ...(will !== undefined ? { will } : {}),
                 ...(status !== undefined ? { status } : {}),
+                ...(mods !== undefined ? { mods } : {}),
             };
         }
         case 'pc': {
@@ -688,11 +771,103 @@ export function parseBody(raw: unknown): Body | null {
             return { k: 'enter', rid, chars };
         }
         case 'turn': {
-            if (!exactly(raw, ['k', 'op', 'id', 'after'])) return null;
+            if (!exactly(raw, ['k', 'op', 'id', 'after', 'mv'])) return null;
             const id = idText(raw.id);
-            if (!id || !(raw.op === 'pass' || raw.op === 'delay' || raw.op === 'eva' || raw.op === 'clash')) return null;
+            if (!id || !(raw.op === 'pass' || raw.op === 'delay' || raw.op === 'eva' || raw.op === 'clash' || raw.op === 'acc')) return null;
             if (raw.after !== undefined && (raw.op !== 'delay' || !idText(raw.after))) return null;
-            return { k: 'turn', op: raw.op, id, ...(raw.after !== undefined ? { after: raw.after as string } : {}) };
+            /* The move an attack was for, so the GM's tracker marks it used. */
+            const mv = raw.mv === undefined ? undefined : cleanText(raw.mv, LIMITS.MAX_NOTE);
+            if (raw.mv !== undefined && (raw.op !== 'acc' || !mv)) return null;
+            return {
+                k: 'turn', op: raw.op, id,
+                ...(raw.after !== undefined ? { after: raw.after as string } : {}),
+                ...(mv ? { mv } : {}),
+            };
+        }
+        case 'npcs': {
+            if (!exactly(raw, ['k', 'ids'])) return null;
+            const ids = idList(raw.ids, LIMITS.MAX_NPCS);
+            return ids ? { k: 'npcs', ids } : null;
+        }
+        case 'npc': {
+            if (!exactly(raw, ['k', 'id', 'rev', 'base', 'full', 'name', 'to', 'edit', 'order', 't', 'm'])) return null;
+            const id = idText(raw.id);
+            const rev = int(raw.rev, 1, Number.MAX_SAFE_INTEGER);
+            const base = int(raw.base, 0, Number.MAX_SAFE_INTEGER);
+            const name = cleanText(raw.name, LIMITS.MAX_NAME * 2) || 'Trainer';
+            const to = raw.to === null ? null : memberList(raw.to);
+            const edit = memberList(raw.edit);
+            const order = slotList(raw.order);
+            if (!id || rev === null || base === null || typeof raw.full !== 'boolean') return null;
+            if ((raw.to !== null && !to) || !edit || !order) return null;
+            const t = raw.t === undefined ? undefined : zText(raw.t);
+            const m = raw.m === undefined ? undefined : zMap(raw.m, order);
+            if (t === null || m === null) return null;
+            /* Whole means the trainer is in it. */
+            if (raw.full && t === undefined) return null;
+            return {
+                k: 'npc', id, rev, base, full: raw.full, name, to, edit, order,
+                ...(t !== undefined ? { t } : {}), ...(m !== undefined ? { m } : {}),
+            };
+        }
+        case 'npcset': {
+            if (!exactly(raw, ['k', 'id', 'oid', 'order', 't', 'm'])) return null;
+            const id = idText(raw.id);
+            const oid = idText(raw.oid);
+            const order = raw.order === undefined ? undefined : slotList(raw.order);
+            const t = raw.t === undefined ? undefined : zText(raw.t);
+            const m = raw.m === undefined ? undefined : zMap(raw.m, null);
+            if (!id || !oid || order === null || t === null || m === null) return null;
+            if (order === undefined && t === undefined && m === undefined) return null;
+            return {
+                k: 'npcset', id, oid,
+                ...(order !== undefined ? { order } : {}),
+                ...(t !== undefined ? { t } : {}), ...(m !== undefined ? { m } : {}),
+            };
+        }
+        case 'npcwant': {
+            if (!exactly(raw, ['k', 'id'])) return null;
+            const id = idText(raw.id);
+            return id ? { k: 'npcwant', id } : null;
+        }
+        case 'gift': {
+            if (!exactly(raw, ['k', 'to', 'oid', 'name', 'z'])) return null;
+            const to = fingerprintText(raw.to);
+            const oid = idText(raw.oid);
+            const name = cleanText(raw.name, LIMITS.MAX_NAME * 2) || 'Pokémon';
+            const z = zText(raw.z);
+            return to && oid && z ? { k: 'gift', to, oid, name, z } : null;
+        }
+        case 'key': {
+            if (!exactly(raw, ['k', 'dh'])) return null;
+            return dhText(raw.dh) ? { k: 'key', dh: raw.dh as string } : null;
+        }
+        case 'move': {
+            if (!exactly(raw, ['k', 'dh', 'to'])) return null;
+            if (!dhText(raw.dh) || !Array.isArray(raw.to) || !raw.to.length || raw.to.length > LIMITS.MAX_MEMBERS) return null;
+            const to: { id: string; c: string }[] = [];
+            for (const e of raw.to) {
+                if (!isRecord(e) || !exactly(e, ['id', 'c'])) return null;
+                const id = fingerprintText(e.id);
+                if (!id || to.some((x) => x.id === id)) return null;
+                if (typeof e.c !== 'string' || !/^[A-Za-z0-9_-]{40,400}$/.test(e.c)) return null;
+                to.push({ id, c: e.c });
+            }
+            return { k: 'move', dh: raw.dh as string, to };
+        }
+        case 'giftoff': {
+            if (!exactly(raw, ['k', 'oid'])) return null;
+            const oid = idText(raw.oid);
+            return oid ? { k: 'giftoff', oid } : null;
+        }
+        case 'giftr': {
+            if (!exactly(raw, ['k', 'oid', 'ok', 'where'])) return null;
+            const oid = idText(raw.oid);
+            if (!oid || typeof raw.ok !== 'boolean') return null;
+            if (raw.where !== 'team' && raw.where !== 'box' && raw.where !== '') return null;
+            /* Accepted is somewhere; refused is nowhere. */
+            if (raw.ok !== (raw.where !== '')) return null;
+            return { k: 'giftr', oid, ok: raw.ok, where: raw.where };
         }
         default:
             return null;

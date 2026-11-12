@@ -12,10 +12,13 @@
    Same-origin and same-profile only, like the map link. Only a HOSTING table
    opens the channel, so a GM screen in a player's browser never hears one. */
 
+import { MAX_COLOR } from '../table/colors';
 import { isCharKey, parseSlimMon, parseSlimTrainer, parseStatus } from '../table/slim';
 import type { CharKey, SlimMon, SlimTrainer } from '../table/slim';
 import type { TurnOp, WireTurns } from '../table/protocol';
 import type { GmStatus } from '../gm/ailments';
+import { parseMods } from './combatMods';
+import type { CombatMods } from './combatMods';
 
 export const COMBAT_LINK_CHANNEL = 'pds-table-combat';
 
@@ -23,11 +26,12 @@ export const COMBAT_LINK_CHANNEL = 'pds-table-combat';
 export const COMBAT_BEAT_MS = 2000;
 export const COMBAT_LOST_MS = 6000;
 
-export interface LinkMember { id: string; name: string }
+export interface LinkMember { id: string; name: string; color?: number }
 
-/** A change the GM made to a player's character: what its HP, Will or status
-    now IS — never a step, so a message delivered twice changes nothing. */
-export interface PcOp { hp?: number; will?: number; status?: GmStatus }
+/** A change the GM made to a player's character: what its HP, Will, status
+    or combat offsets now ARE — never a step, so a message delivered twice
+    changes nothing. `mods` is the whole set, a Pokemon's two defences in it. */
+export interface PcOp { hp?: number; will?: number; status?: GmStatus; mods?: CombatMods }
 
 export type CombatLinkMessage =
     /** Table → GM screen: a hosted table is open, with these players at it. */
@@ -41,7 +45,7 @@ export type CombatLinkMessage =
     /** Table → GM screen: these characters join the fight, initiative rolled. */
     | { t: 'enter'; member: string; player: string; chars: { key: CharKey; init: number }[] }
     /** Table → GM screen: a player passed, delayed or spent an action. */
-    | { t: 'act'; member: string; op: TurnOp; pid: string; after: string | null }
+    | { t: 'act'; member: string; op: TurnOp; pid: string; after: string | null; move?: string | null }
     /** Table → GM screen: the GM pressed Next on the table's strip. */
     | { t: 'next' }
     /** GM screen → table: say you are there, now. Answered from the table's
@@ -72,7 +76,9 @@ export function parseCombatLink(raw: unknown): CombatLinkMessage | null {
                 if (!isRecord(m)) return null;
                 const id = str(m.id, 80), name = str(m.name, 80);
                 if (id === null || name === null) return null;
-                members.push({ id, name });
+                const color = Number.isInteger(m.color) && (m.color as number) >= 0 && (m.color as number) <= MAX_COLOR
+                    ? m.color as number : undefined;
+                members.push(color === undefined ? { id, name } : { id, name, color });
             }
             return { t: 'host', table, members };
         }
@@ -105,8 +111,10 @@ export function parseCombatLink(raw: unknown): CombatLinkMessage | null {
             const after = raw.after === null ? null : str(raw.after, 80);
             const op = raw.op;
             if (member === null || pid === null || (raw.after !== null && after === null)) return null;
-            if (op !== 'pass' && op !== 'delay' && op !== 'eva' && op !== 'clash') return null;
-            return { t: 'act', member, op, pid, after };
+            if (op !== 'pass' && op !== 'delay' && op !== 'eva' && op !== 'clash' && op !== 'acc') return null;
+            const move = raw.move === undefined || raw.move === null ? null : str(raw.move, 60);
+            if (raw.move !== undefined && raw.move !== null && move === null) return null;
+            return { t: 'act', member, op, pid, after, move };
         }
         case 'turns': {
             if (raw.turns !== null && !isRecord(raw.turns)) return null;
@@ -123,6 +131,11 @@ export function parseCombatLink(raw: unknown): CombatLinkMessage | null {
                 const status = parseStatus(o.status);
                 if (!status) return null;
                 op.status = status;
+            }
+            if (o.mods !== undefined) {
+                const mods = parseMods(o.mods);
+                if (!mods) return null;
+                op.mods = mods;
             }
             return { t: 'op', member, key: raw.key, op };
         }

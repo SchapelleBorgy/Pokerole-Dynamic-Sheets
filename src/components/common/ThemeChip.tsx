@@ -4,7 +4,7 @@ import { mixHex } from '../../lib/color';
 /* One type/theme chip. The theme picker's two rows and the badge picker all
    build their grids from this, so they cannot drift apart. */
 
-export function ThemeChip({ swatch, icon, label, iconOnly, themeType, selected, onClick }: {
+export function ThemeChip({ swatch, icon, label, iconOnly, themeType, selected, pressed, className, dataType, onClick }: {
     swatch: string;
     icon: string;
     label: string;
@@ -13,12 +13,20 @@ export function ThemeChip({ swatch, icon, label, iconOnly, themeType, selected, 
     /** The page's current theme, which decides how the ink is corrected. */
     themeType: string;
     selected?: boolean;
+    /** Set, the chip is a toggle button (the homebrew type picker) rather
+        than a clickable span, so it takes the keyboard too. */
+    pressed?: boolean;
+    className?: string;
+    dataType?: string;
     onClick?: () => void;
 }) {
     const light = isLightTheme(themeType);
+    const Tag = pressed === undefined ? 'span' : 'button';
     return (
-        <span
-            className={'type-badge theme-chip' + (iconOnly ? ' icon-only' : '')}
+        <Tag
+            {...(pressed === undefined ? null : { type: 'button' as const, 'aria-pressed': pressed, 'aria-label': label })}
+            className={'type-badge theme-chip' + (iconOnly ? ' icon-only' : '') + (className ? ' ' + className : '')}
+            data-type={dataType}
             title={label}
             style={{
                 background: swatch + '33',
@@ -35,6 +43,6 @@ export function ThemeChip({ swatch, icon, label, iconOnly, themeType, selected, 
         >
             <i className={'fa-solid ' + icon}></i>
             {!iconOnly && <> {label}</>}
-        </span>
+        </Tag>
     );
 }

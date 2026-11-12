@@ -21,6 +21,7 @@
 @import './card/moves-ui.css';
 @import './card/move-cards.css';
 @import './card/notepad.css';
+@import './card/homebrew.css';
 @import './shared/tooltip.css';
 @import './card/light-theme.css';
 @import './app-root.css';
@@ -33,5 +34,7 @@
 
 /* The "new version is ready" bar, on every page that registers a worker. */
 @import './shared/update-prompt.css';
+/* The guided tour and its first-time question. */
+@import './shared/tour.css';
 @import './shared/pick-reorder.css';
 @import './shared/scrollbars.css';

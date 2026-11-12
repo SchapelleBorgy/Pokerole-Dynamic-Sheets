@@ -23,8 +23,9 @@ export type HideKind = 'stamp' | 'token' | 'label';
 export const HIDE_KINDS: readonly HideKind[] = ['stamp', 'token', 'label'];
 
 /** What the GM keeps off one map's players' picture: whole kinds — new ones
-    included — and single objects by id. */
-export interface PlayerHide { kinds: HideKind[]; ids: string[] }
+    included — and single objects by id. `shown` are the exceptions to a
+    hidden kind: the few the GM put back after hiding them all. */
+export interface PlayerHide { kinds: HideKind[]; ids: string[]; shown?: string[] }
 
 /** One object on a map, as the table's GM picks from them. */
 export interface MapObjectInfo {
@@ -54,7 +55,14 @@ export type LinkMessage =
         t: 'image'; seq: number; mapId: string; title: string; live: boolean; image: Blob; w: number; h: number;
         /** Every landmark, token and label on the map, hidden or not. */
         objects: MapObjectInfo[];
+        /** The GM pressed "Show this scene": put it on show once it is in. */
+        show?: boolean;
+        /** The scene it takes over from, taken off the table once this one
+            is on show (its hide choices are kept, for when it comes back). */
+        replaces?: string;
     }
+    /** Map Maker → table: put a map the table already holds on show. */
+    | { t: 'show'; mapId: string }
     /** Map Maker → table: the map stops following. */
     | { t: 'unlive'; mapId: string }
     /** Table → Map Maker: what became of an image. */
@@ -90,7 +98,17 @@ export function parseLink(raw: unknown): LinkMessage | null {
             if (typeof raw.w !== 'number' || typeof raw.h !== 'number') return null;
             const objects = raw.objects === undefined ? [] : parseObjects(raw.objects);
             if (!objects) return null;
-            return { t: 'image', seq: raw.seq, mapId, title, live: raw.live, image: raw.image, w: raw.w, h: raw.h, objects };
+            if (raw.show !== undefined && typeof raw.show !== 'boolean') return null;
+            const replaces = raw.replaces === undefined ? undefined : str(raw.replaces, 80);
+            if (replaces === null) return null;
+            const out: LinkMessage = { t: 'image', seq: raw.seq, mapId, title, live: raw.live, image: raw.image, w: raw.w, h: raw.h, objects };
+            if (raw.show) out.show = true;
+            if (replaces && replaces !== mapId) out.replaces = replaces;
+            return out;
+        }
+        case 'show': {
+            const mapId = str(raw.mapId, 80);
+            return mapId === null ? null : { t: 'show', mapId };
         }
         case 'unlive': {
             const mapId = str(raw.mapId, 80);
@@ -111,7 +129,13 @@ export function parseHide(raw: unknown): PlayerHide | null {
     if (raw.kinds.length > HIDE_KINDS.length || raw.ids.length > MAX_MAP_OBJECTS) return null;
     if (!raw.kinds.every(isHideKind)) return null;
     if (!raw.ids.every((v) => typeof v === 'string' && v.length <= 80)) return null;
-    return { kinds: [...new Set(raw.kinds as HideKind[])], ids: [...new Set(raw.ids as string[])] };
+    const out: PlayerHide = { kinds: [...new Set(raw.kinds as HideKind[])], ids: [...new Set(raw.ids as string[])] };
+    if (raw.shown !== undefined) {
+        if (!Array.isArray(raw.shown) || raw.shown.length > MAX_MAP_OBJECTS) return null;
+        if (!raw.shown.every((v) => typeof v === 'string' && v.length <= 80)) return null;
+        if (raw.shown.length) out.shown = [...new Set(raw.shown as string[])];
+    }
+    return out;
 }
 
 function parseHides(raw: unknown): Record<string, PlayerHide> | null {
@@ -140,7 +164,9 @@ export function parseObjects(raw: unknown): MapObjectInfo[] | null {
 
 /** Whether `hide` keeps this object off the players' picture. */
 export function isHidden(hide: PlayerHide | null | undefined, kind: HideKind, id: string): boolean {
-    return !!hide && (hide.kinds.includes(kind) || hide.ids.includes(id));
+    if (!hide) return false;
+    if (hide.ids.includes(id)) return true;
+    return hide.kinds.includes(kind) && !(hide.shown ?? []).includes(id);
 }
 
 export function openLink(): BroadcastChannel | null {

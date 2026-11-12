@@ -1,5 +1,5 @@
 import { TERRAINS, TERRAIN_BY_CODE, terrainOf } from './terrain';
-import { LANDMARKS, LANDMARK_GROUPS, landmarkOf } from './landmarks';
+import { LANDMARKS, LANDMARK_GROUPS, fillerTerrain, landmarkOf } from './landmarks';
 import { MAP_STYLES, PATH_KINDS, styleOf } from './styles';
 import { LABEL_FONTS, LABEL_WARPS } from './labelText';
 import { resolvedOf } from './raster';
@@ -42,6 +42,7 @@ const TERRAIN_USE: Record<string, string> = {
     'tall-grass': 'tall grass where wild Pokémon hide',
     'forest': 'temperate woods',
     'jungle': 'tropical rainforest',
+    'hills': 'rolling green uplands, downs and foothills: lower and gentler than mountains',
     'desert': 'sand desert and dunes',
     'badlands': 'dry rocky scrub, mesas, canyon country',
     'tundra': 'cold barren plains',
@@ -74,12 +75,12 @@ export function recipeBrief(o: BriefOptions): string {
     const say = (...lines: string[]) => out.push(...lines);
 
     say(
-        '# Pokerole Map Maker: map recipe instructions',
+        '# Pokerole World Builder: map recipe instructions',
         '',
-        'You are designing a map for the Pokerole Map Maker, a tool for drawing maps for a Pokémon tabletop role-playing game. '
-        + 'You do not draw the map yourself. You write a MAP RECIPE, a JSON description of what goes where, and the Map Maker paints it.',
+        'You are designing a map for the Pokerole World Builder, a tool for drawing maps for a Pokémon tabletop role-playing game. '
+        + 'You do not draw the map yourself. You write a MAP RECIPE, a JSON description of what goes where, and the World Builder paints it.',
         '',
-        'Follow these instructions exactly. They list everything the Map Maker understands. Anything not listed is ignored or rejected, '
+        'Follow these instructions exactly. They list everything the World Builder understands. Anything not listed is ignored or rejected, '
         + 'so never invent field names, terrain names, path kinds or landmark types, and never leave out a required field.',
         '',
         '## What to draw',
@@ -191,7 +192,7 @@ export function recipeBrief(o: BriefOptions): string {
         '',
         '- "outline": how the edge is drawn.',
         '  - "natural" (the default, except for "rect"): the edge wanders like a real coastline or forest edge. You give the rough shape; '
-        + 'the Map Maker adds bays, headlands and crinkles. It moves the edge by about 7% of the shape\'s size (at least 0.35, at most 3.5 cells).',
+        + 'the World Builder adds bays, headlands and crinkles. It moves the edge by about 7% of the shape\'s size (at least 0.35, at most 3.5 cells).',
         '  - "smooth": rounded and clean, no wandering; a polygon\'s corners are rounded off.',
         '  - "sharp" (the default for "rect"): exactly as given, straight edges and hard corners: buildings, walls, fields, rooms, arenas.',
         '- "roughness": 0 to 3 (default 1): how far a natural edge wanders. 0.5 is gentle, 2 is very jagged.',
@@ -389,7 +390,8 @@ function describeDoc(doc: MapDoc): string[] {
     const f = (x: number, y: number) => `[${n2(x)}, ${n2(y)}]`;
     if (doc.stamps.length) {
         out.push('', 'Landmarks already on it:');
-        for (const s of doc.stamps) out.push(`- ${landmarkOf(s.landmark).slug} at ${f(s.x, s.y)}, size ${n2(s.size)}${s.label ? `, named ${JSON.stringify(s.label)}` : ''}`);
+        /* A single filler has no name a recipe knows. */
+        for (const s of doc.stamps.filter((x) => !fillerTerrain(x.landmark))) out.push(`- ${landmarkOf(s.landmark).slug} at ${f(s.x, s.y)}, size ${n2(s.size)}${s.label ? `, named ${JSON.stringify(s.label)}` : ''}`);
     }
     if (doc.labels.length) {
         out.push('', 'Labels already on it:');

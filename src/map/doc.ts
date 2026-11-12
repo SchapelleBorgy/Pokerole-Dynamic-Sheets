@@ -6,8 +6,14 @@ import {
 import type { Raster } from './raster';
 import { DEFAULT_BORDERS, MAX_SOFT, MIN_SOFT, decodeEdges, edgesOf, encodeEdges, isEdgeKind, rememberEdges } from './edges';
 import { decodeFog, encodeFog, fogOf, rememberFog } from './fog';
+import { NO_FILLER, decodeFillers, encodeFillers, fillersOf, rememberFillers } from './fillers';
 import { normalizeSketch } from './sketch';
-import type { EdgeKind, LabelRole, MapBorders, MapDoc, MapLabel, MapPath, MapStamp, MapToken, StyleId } from './types';
+import { normalizePlaced } from './world/placed';
+import { isLookId } from './world/looks';
+import { normalizeRoom, resizeRoom } from './world/room';
+import type {
+    DocKind, DocParent, EdgeKind, LookId, MapRoom, LabelRole, MapBorders, MapDoc, MapLabel, MapPath, MapPicture, MapStamp, MapToken, StyleId,
+} from './types';
 
 /* Pure operations on a MapDoc. Nothing here touches the DOM or storage, so the
    harness in .verify/ can drive all of it from Node. */
@@ -26,14 +32,16 @@ export function clampCells(n: number): number {
 /** A new map: nothing painted yet, so all of it is the background. */
 export function createDoc(opts: {
     name?: string; cols?: number; rows?: number; styleId?: StyleId; background?: string; scaleLabel?: string;
+    picture?: MapPicture; kind?: DocKind; parent?: DocParent; look?: LookId; room?: MapRoom;
 } = {}): MapDoc {
     const cols = clampCells(opts.cols ?? 40);
     const rows = clampCells(opts.rows ?? 30);
     const res = pickRes(cols, rows);
     const background = (TERRAIN_BY_SLUG.get(opts.background ?? 'sea') ?? TERRAIN_BY_SLUG.get('sea')!).code;
-    return {
+    const doc: MapDoc = {
         id: uid(),
         name: opts.name?.trim() || 'New map',
+        kind: opts.kind ?? 'world',
         styleId: opts.styleId ?? 'handdrawn',
         cols,
         rows,
@@ -45,13 +53,37 @@ export function createDoc(opts: {
         edges: '',
         borders: { ...DEFAULT_BORDERS, terrain: {} },
         fog: '',
+        fillers: '',
         paths: [],
         stamps: [],
         tokens: [],
         labels: [],
         sketches: [],
+        placed: [],
         updatedAt: new Date().toISOString(),
     };
+    if (opts.picture) doc.picture = opts.picture;
+    if (opts.look) doc.look = opts.look;
+    if (opts.room) doc.room = opts.room;
+    if (opts.parent) doc.parent = { ...opts.parent };
+    return doc;
+}
+
+const DOC_KINDS: readonly DocKind[] = ['world', 'city', 'interior'];
+
+export function isDocKind(v: unknown): v is DocKind {
+    return typeof v === 'string' && (DOC_KINDS as readonly string[]).includes(v);
+}
+
+/** An id another map is named by: short and plain, or nothing. */
+const refId = (v: unknown): string | undefined =>
+    typeof v === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v) ? v : undefined;
+
+function normalizeParent(raw: unknown): DocParent | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const p = raw as Record<string, unknown>;
+    const doc = refId(p.doc), object = refId(p.object);
+    return doc && object ? { doc, object } : undefined;
 }
 
 const num = (v: unknown, dflt: number): number => (typeof v === 'number' && isFinite(v) ? v : dflt);
@@ -108,10 +140,16 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
        no fog, or fog cut to fit. */
     let fog = str(r.fog, '');
     if (fog && runTotal(fog) !== cols * res * rows * res) fog = encodeFog(decodeFog(fog, cols * res * rows * res));
+    let fillers = str(r.fillers, '');
+    if (fillers && (!isEncoded(fillers) || runTotal(fillers) !== cols * res * rows * res)) {
+        fillers = encodeFillers(decodeFillers(fillers, cols * res * rows * res));
+    }
 
-    return {
+    const picture = normalizePicture(r.picture);
+    const out: MapDoc = {
         id: str(r.id, '') || uid(),
         name: str(r.name, 'Untitled map'),
+        kind: isDocKind(r.kind) ? r.kind : 'world',
         styleId,
         cols,
         rows,
@@ -127,12 +165,17 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
         edges,
         borders: normalizeBorders(r.borders),
         fog,
+        fillers,
         paths: arr<MapPath>(r.paths).filter((p) => p && Array.isArray(p.points) && p.points.length >= 2)
             .map((p) => ({ ...p, id: p.id || uid(), width: num(p.width, 0.6) })),
         stamps: arr<MapStamp>(r.stamps).filter((s) => s && typeof s.landmark === 'string')
             .map((s) => ({
                 ...s, id: s.id || uid(), x: num(s.x, 0), y: num(s.y, 0),
                 size: num(s.size, 2), rotation: num(s.rotation, 0), flip: !!s.flip, snap: optBool(s.snap),
+                label: typeof s.label === 'string' ? s.label.replace(/\r\n?/g, '\n') : undefined,
+                labelShow: s.labelShow === 'hover' ? 'hover' as const : undefined,
+                variant: typeof s.variant === 'number' && isFinite(s.variant) ? Math.max(0, Math.round(s.variant)) : undefined,
+                link: refId(s.link),
             })),
         tokens: arr<MapToken>(r.tokens).filter((t) => t && typeof t.kind === 'string')
             .map((t) => ({
@@ -147,7 +190,31 @@ export function normalizeDoc(raw: unknown): MapDoc | null {
                 ...labelTypeFields(l),
             })),
         sketches: arr<unknown>(r.sketches).map(normalizeSketch).filter((k): k is NonNullable<typeof k> => !!k),
+        placed: arr<unknown>(r.placed).map(normalizePlaced).filter((o): o is NonNullable<typeof o> => !!o)
+            .map((o) => (o.id ? o : { ...o, id: uid() })),
         updatedAt: str(r.updatedAt, new Date().toISOString()),
+    };
+    if (picture) out.picture = picture;
+    if (isLookId(r.look)) out.look = r.look;
+    const room = normalizeRoom(r.room, out.cols, out.rows);
+    if (room) out.room = room;
+    const parent = normalizeParent(r.parent);
+    if (parent && parent.doc !== out.id) out.parent = parent;
+    return out;
+}
+
+/** A picture's place, kept only when it is whole and sane. */
+function normalizePicture(raw: unknown): MapPicture | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const p = raw as Record<string, unknown>;
+    const id = str(p.id, '');
+    if (!/^[a-z0-9]{8,64}$/.test(id)) return undefined;
+    const w = num(p.w, 0), h = num(p.h, 0);
+    if (!(w > 0 && h > 0)) return undefined;
+    return {
+        id, name: str(p.name, '').slice(0, 120),
+        x: num(p.x, 0), y: num(p.y, 0), w, h,
+        opacity: Math.max(0.1, Math.min(1, num(p.opacity, 1))),
     };
 }
 
@@ -236,6 +303,14 @@ export function resizeDoc(doc: MapDoc, cols: number, rows: number): MapDoc {
         fog = encodeFog(moved.data);
         rememberFog(fog, moved.data);
     }
+    let fillers = '';
+    const filled = fillersOf(doc);
+    if (filled) {
+        const was: Raster = { w: doc.cols * doc.res, h: doc.rows * doc.res, res: doc.res, data: filled };
+        const moved = resizeRaster(was, cols, rows, NO_FILLER);
+        fillers = encodeFillers(moved.data);
+        rememberFillers(fillers, moved.data);
+    }
     const cx = (v: number) => Math.max(0, Math.min(cols, v));
     const cy = (v: number) => Math.max(0, Math.min(rows, v));
     return {
@@ -246,11 +321,14 @@ export function resizeDoc(doc: MapDoc, cols: number, rows: number): MapDoc {
         terrain,
         edges,
         fog,
+        fillers,
         stamps: doc.stamps.map((s) => ({ ...s, x: cx(s.x), y: cy(s.y) })),
         tokens: doc.tokens.map((t) => ({ ...t, x: cx(t.x), y: cy(t.y) })),
         labels: doc.labels.map((l) => ({ ...l, x: cx(l.x), y: cy(l.y) })),
         paths: doc.paths.map((p) => ({ ...p, points: p.points.map(([x, y]) => [cx(x), cy(y)] as [number, number]) })),
         sketches: doc.sketches.map((k) => ({ ...k, points: k.points.map(([x, y]) => [cx(x), cy(y)] as [number, number]) })),
+        placed: doc.placed.map((o) => ({ ...o, x: Math.min(o.x, Math.max(0, cols - 1)), y: Math.min(o.y, Math.max(0, rows - 1)) })),
+        room: resizeRoom(doc.room, cols, rows),
     };
 }
 

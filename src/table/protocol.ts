@@ -18,6 +18,8 @@
 
 import type { GmStatus } from '../gm/ailments';
 import type { CharKey, SlimMon, SlimTrainer } from './slim';
+import type { MegaRules } from '../lib/megaRules';
+import type { CombatMods } from '../lib/combatMods';
 
 export const PROTOCOL_VERSION = 1;
 
@@ -46,6 +48,10 @@ export interface WireRoll {
     pain?: number;
     /** The successes an accuracy roll needed: its action number this round. */
     need?: number;
+    /** Successes over `need` that make it a critical, when not the usual 3
+        (High Critical, a crit offset, a move that always crits). Only with
+        `need`. */
+    crit?: number;
 }
 
 /** The optional extras a roll request can carry, as they travel. */
@@ -53,12 +59,15 @@ export interface RollExtras {
     bonus?: number;
     pain?: number;
     need?: number;
+    crit?: number;
 }
 
 export interface WireMember {
     id: string;
     name: string;
     host: boolean;
+    /** Index into PLAYER_COLORS (colors.ts); absent from an older client. */
+    color?: number;
 }
 
 /** One row of a combat tracker as the players see it. Everything here is
@@ -185,6 +194,10 @@ export interface WireTrack {
     yt?: string;
     /** Seconds; 0 while unknown. */
     dur: number;
+    /** A file the GM wants every player to have before it is needed. Any
+        other file is fetched only once it is on a deck. Absent, never
+        false, so a library without one still reads on an older page. */
+    pre?: true;
 }
 
 /** The two decks the GM mixes: a Background bed and the current Scene. */
@@ -248,6 +261,8 @@ export interface WireTurnEntry {
     acted?: number;
     eva?: boolean;
     clash?: boolean;
+    /** A player's character only: the moves it used this Round, by name. */
+    used?: string[];
 }
 
 export interface WireTurns {
@@ -270,7 +285,7 @@ export interface TrackLoad {
 
 export type Body =
     /** Any member, on connect and every heartbeat. Doubles as presence. */
-    | { k: 'hello'; name: string }
+    | { k: 'hello'; name: string; color?: number }
     /** Host only. Also the liveness signal players watch for. */
     | { k: 'roster'; members: WireMember[] }
     /** Player to host: please roll this. */
@@ -294,6 +309,9 @@ export type Body =
     /** Player to host: roll this for my Pokémon. `mi` and `move` name the
         move for accuracy and damage, and are -1 and '' otherwise. */
     | { k: 'act'; tok: string; roll: KitRoll; mi: number; move: string }
+    /** Host only. The room is locked and this key was not at the table when
+        it was: not let in. */
+    | { k: 'locked'; id: string }
     /** Host only. The music library everyone prefetches. */
     | { k: 'library'; tracks: WireTrack[] }
     /** Host only. Both decks. Sent on every change and every few seconds. */
@@ -314,10 +332,13 @@ export type Body =
     | { k: 'map'; rev: number; show: boolean; title: string; live: boolean; image: WireMapImage | null }
     /** Host only. The turn strip, or null when no fight is on the table. */
     | { k: 'turns'; rev: number; turns: WireTurns | null }
+    /** Host only. The Mega-Evolution rules the GM set (src/lib/megaRules.ts):
+        players' cards and character panels Mega Evolve by them. */
+    | { k: 'rules'; mega: MegaRules }
     /** Host only. The GM changed one of `to`'s characters in the fight: the
-        HP, Will or status it now has. Values, not steps, so a resend is
-        harmless. */
-    | { k: 'pcop'; to: string; key: CharKey; oid: string; hp?: number; will?: number; status?: GmStatus }
+        HP, Will, status or combat offsets it now has. Values, not steps, so a
+        resend is harmless. */
+    | { k: 'pcop'; to: string; key: CharKey; oid: string; hp?: number; will?: number; status?: GmStatus; mods?: CombatMods }
     /** Player to host: one of my characters as the GM's copy should have it.
         `ack` is the last `pcop` applied to it, so the host stops resending. */
     | { k: 'pc'; key: CharKey; ack?: string; trainer?: SlimTrainer; mon?: SlimMon }
@@ -325,10 +346,46 @@ export type Body =
         initiative, 1d6 + bonus. */
     | { k: 'enter'; rid: string; chars: { key: CharKey; bonus: number }[] }
     /** Player to host: my turn is over, I delay it, or I spent an action on an
-        Evasion or a Clash. */
-    | { k: 'turn'; op: TurnOp; id: string; after?: string };
+        attack, an Evasion or a Clash. */
+    | { k: 'turn'; op: TurnOp; id: string; after?: string; mv?: string }
+    /** Host only. The GM's trainers shared at the table, by id. A player's
+        copy of any other is dropped. */
+    | { k: 'npcs'; ids: string[] }
+    /** Host only. A shared trainer (npcShare.ts): whole when `full`, else the
+        pieces that changed since `base`. `to` is who may see it (null: the
+        whole table), `edit` who may change it. Each piece is a zpart: `t` the
+        trainer, `m` a team Pokémon by its key in `order`, the six slots. */
+    | {
+        k: 'npc'; id: string; rev: number; base: number; full: boolean; name: string;
+        to: string[] | null; edit: string[]; order: string[]; t?: string; m?: Record<string, string>;
+    }
+    /** Player to host: my changes to a shared trainer I may edit. */
+    | { k: 'npcset'; id: string; oid: string; order?: string[]; t?: string; m?: Record<string, string> }
+    /** Player to host: I missed a piece of this one; all of it again, please. */
+    | { k: 'npcwant'; id: string }
+    /** Host only. The GM gives `to` a wild Pokémon: `z` is its card, packed. */
+    | { k: 'gift'; to: string; oid: string; name: string; z: string }
+    /** Host only. The GM took a gift back before it was answered. */
+    | { k: 'giftoff'; oid: string }
+    /** Player to host: what became of a gift. */
+    | { k: 'giftr'; oid: string; ok: boolean; where: GiftWhere }
+    /** Player to host, after its hello: the public half of this page's ECDH
+        pair (crypto.ts), so a new password can be sealed to it alone. A
+        message of its own, not a field on `hello`, so an older GM's page
+        drops it and still lets the player in. */
+    | { k: 'key'; dh: string }
+    /** Host only. The GM changed the password: each member's copy of the new
+        one, sealed to their key with the GM's one-off `dh`. Whoever follows
+        joins the new room; anyone not listed stays behind with the old one. */
+    | { k: 'move'; dh: string; to: { id: string; c: string }[] };
 
-export type TurnOp = 'pass' | 'delay' | 'eva' | 'clash';
+/** Where an accepted gift went: the team, a PC box, or nowhere (refused, or
+    no room anywhere). */
+export type GiftWhere = 'team' | 'box' | '';
+
+/** `acc`: an attack rolled. Like an Evasion or a Clash it is an action done:
+    the GM screen fills its pip and marks the move (`mv`) used for the Round. */
+export type TurnOp = 'pass' | 'delay' | 'eva' | 'clash' | 'acc';
 
 export interface Inner {
     v: number;
@@ -367,6 +424,8 @@ export const LIMITS = {
     MAX_BONUS: 99,
     MAX_PAIN: 5,
     MAX_NEED: 5,
+    /** The usual critical margin, the most a roll may say it needs. */
+    MAX_CRIT: 3,
 
     /** Combat trackers shared with the players. Far above any real table:
         the GM screen itself gets unwieldy well before this. */
@@ -407,7 +466,22 @@ export const LIMITS = {
     /** Combatants on the turn strip. */
     MAX_TURNS: 60,
     MAX_ROUND: 999,
+    /** Moves marked used in a Round, per combatant: more than any Pokémon
+        knows (Insight + 2 tops out well under it). */
+    MAX_USED_MOVES: 16,
+    /** Trainers the GM may share at once, and gifts waiting for an answer. */
+    MAX_NPCS: 8,
+    MAX_GIFTS: 6,
+    /** Slots on a team. */
+    TEAM_SLOTS: 6,
 } as const;
+
+/** The types a shared file may carry, and the only ones a downloaded file is
+    given in this browser. Pictures are raster only: an SVG is a document that
+    runs its scripts when it is opened in a tab of its own ("Open image in new
+    tab" on the map), and a blob made from it has this page's origin — so a
+    hostile GM could read everything the site keeps in a player's browser. */
+export const FILE_MIME_RE = /^(image\/(png|jpeg|webp|gif|avif)|(audio|video)\/[a-z0-9.+-]{1,40}|application\/octet-stream)$/;
 
 /** How often everyone announces themselves, and how long the host waits before
     treating a silent member as gone. Three missed beats, so one dropped packet

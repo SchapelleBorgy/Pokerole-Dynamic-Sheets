@@ -5,12 +5,14 @@
 import type { PokedexEntry } from '../data/types';
 import type { CharKey } from '../table/slim';
 import type { WireTurnEntry, WireTurns } from '../table/protocol';
+import { LIMITS } from '../table/protocol';
 import { IMAGE_RE } from '../table/slim';
 import { initOffset } from './combat';
-import { entityPool, entityRef, monShownName, participantToken } from './entities';
+import { entityPool, entityRef, monShownName, participantLook, participantToken } from './entities';
 import { uid } from './state';
 import { parsePcToken, pcToken } from './tablePcs';
-import { actedOf, hasActions, passOrderOf, pidOf } from './turns';
+import { actedOf, hasActions, passOrderOf, pidOf, usedCount } from './turns';
+import { clashLimit, evaLimit } from '../lib/combatMods';
 import type { CanAct } from './turns';
 import type { GmCombat, GmCombatant, GmState } from './types';
 
@@ -40,7 +42,9 @@ export function buildTurns(state: GmState, c: GmCombat, dexById: DexById): WireT
     const order: WireTurnEntry[] = passOrderOf(c).map((pid) => {
         const p = byId.get(pid)!;
         const r = rec(p);
-        const dex = typeof r.dexId === 'string' && r.dexId ? dexById(r.dexId) : null;
+        /* As it is now: a Mega Evolution since it joined changes its picture. */
+        const look = participantLook(state, dexById, p);
+        const dex = look.dexId ? dexById(look.dexId) : null;
         const img = dex && IMAGE_RE.test(dex.Image) ? dex.Image : '';
         const pc = parsePcToken(String(r.src || ''));
         /* A player's character goes by its own name — the tracker's label
@@ -48,15 +52,24 @@ export function buildTurns(state: GmState, c: GmCombat, dexById: DexById): WireT
         const own = pc ? entityRef(state, dexById, String(r.src)) : null;
         const base: WireTurnEntry = {
             id: pid,
-            name: String((own && own.name) || r.label || '?').slice(0, 48) || '?',
+            name: String((own && own.name) || look.label || '?').slice(0, 48) || '?',
             img,
             own: '', ck: '',
             done: c.passed.includes(pid),
             out: !hasActions(p) || !canAct(p),
+            /* Everyone's action count is on the strip: which action the
+               fight is on is no secret at the table. */
+            acted: actedOf(p),
         };
+        const used = Array.isArray(r.usedMoves) ? (r.usedMoves as string[]).filter((m) => typeof m === 'string' && m).slice(0, 16) : [];
         return pc ? {
             ...base, own: pc.member, ck: pc.key,
-            acted: actedOf(p), eva: !!r.usedEva, clash: !!r.usedClash,
+            /* Whether there are any left this Round: the player's panel
+               greys the chip on that, however many the offsets allow. */
+            eva: usedCount(r.usedEva) >= evaLimit(own && own.mods),
+            clash: usedCount(r.usedClash) >= clashLimit(own && own.mods),
+            /* The player's own moves used this Round: the GM's never go out. */
+            ...(used.length ? { used: used.map((m) => m.slice(0, 60)) } : {}),
         } : base;
     });
     return {
@@ -86,6 +99,17 @@ export function enterFight(
 ): GmCombat {
     const copy = state.tablePcs[member];
     if (!copy) return c;
+    /* Characters from as many table members as a table holds, and no more:
+       keys that come and go at the table must not fill the GM's fight — and
+       the saved board, which carries each one's sheet — without end. A member
+       already in keeps entering their own characters (seven at most: their
+       trainer and six team slots, each one combatant). */
+    const members = new Set<string>();
+    for (const p of c.participants) {
+        const pc = parsePcToken(String(rec(p).src || ''));
+        if (pc) members.add(pc.member);
+    }
+    if (!members.has(member) && members.size >= LIMITS.MAX_MEMBERS - 1) return c;
     let parts = c.participants.slice();
     for (const ch of chars) {
         const src = pcToken(member, ch.key);

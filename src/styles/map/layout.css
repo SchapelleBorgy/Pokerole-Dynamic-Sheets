@@ -39,9 +39,9 @@
 
 /* The words on the bar's buttons go first when the window narrows; the
    glyphs stay, and each button keeps its hint. The bar is exactly full at
-   about 1480px with the words showing; any narrower and .map-settings (which
+   about 1680px with the words showing; any narrower and .map-settings (which
    may shrink, though its buttons cannot) is painted over by the next group. */
-@media (max-width: 1480px) {
+@media (max-width: 1680px) {
     .map-btn-text { display: none; }
 }
 
@@ -70,11 +70,24 @@
 
 .map-tool:disabled { opacity: 0.35; cursor: default; }
 
-.map-rail-sep {
-    width: 70%;
+/* Tools in groups of related ones, a short thin line between groups. */
+.map-rail-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    flex: 0 0 auto;
+}
+
+.map-rail-group:empty { display: none; }
+
+.map-rail-group:not(:empty) ~ .map-rail-group:not(:empty)::before {
+    content: '';
+    width: 60%;
     height: 1px;
-    background: var(--border-color);
-    margin: 0.2rem 0;
+    background: currentColor;
+    opacity: 0.3;
+    margin: 0.15rem 0;
     flex: 0 0 auto;
 }
 
@@ -159,6 +172,57 @@
 .map-popover-go:disabled { opacity: 0.45; cursor: default; }
 
 .map-export-pop { width: 21rem; }
+
+/* The colour picker (ColorField.tsx), in a popover held inside the window. */
+.map-colorpick-pop { min-width: 0; width: 15.5rem; padding: 0.65rem; }
+.map-colorpick { display: flex; flex-direction: column; gap: 0.55rem; }
+.map-colorpick-sv {
+    position: relative;
+    height: 9rem;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px #0006;
+    cursor: crosshair;
+    touch-action: none;
+}
+.map-colorpick-dot, .map-colorpick-knob {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px #000a, 0 1px 3px #0008;
+    pointer-events: none;
+}
+.map-colorpick-hue {
+    position: relative;
+    height: 0.85rem;
+    border-radius: 999px;
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+    box-shadow: inset 0 0 0 1px #0006;
+    cursor: pointer;
+    touch-action: none;
+}
+.map-colorpick-knob { top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+.map-colorpick-sv:focus-visible, .map-colorpick-hue:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.map-colorpick-row { display: flex; align-items: center; gap: 0.4rem; }
+.map-colorpick-now { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; border-radius: 6px; box-shadow: inset 0 0 0 1px #0006; }
+.map-colorpick-hex {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--panel-solid);
+    color: var(--text-primary);
+    font: inherit;
+    font-family: ui-monospace, monospace;
+}
+.map-colorpick-hex:focus { outline: none; border-color: var(--accent); }
+.map-colorpick-dropper { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; }
+.map-colorpick-presets { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0.3rem; }
+.map-colorpick-preset { aspect-ratio: 1; padding: 0; border: 1px solid #0006; border-radius: 5px; cursor: pointer; }
+.map-colorpick-preset[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .map-export-folder { margin: 0.3rem 0 0.2rem; }
 .map-export-folder button { margin-top: 0.4rem; }
 .map-warn { color: #fca5a5; opacity: 1; }
@@ -189,6 +253,24 @@
 .map-bg-chip.pixelated { image-rendering: pixelated; }
 .map-bg-pop { width: 20rem; }
 .map-bg-group-name { font-size: 0.68rem; font-weight: 600; color: var(--text-secondary); margin: 0.55rem 0 0.25rem; }
+
+/* A picture of the GM's own under the map: its own button on the bar, and
+   in the new map form. */
+.map-picture-btn { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; flex: 0 0 auto; }
+.map-picture-btn.on > .fa-file-import { color: var(--accent); }
+.map-picture-pop { width: 20rem; }
+.map-picture .map-hint { margin: 0 0 0.5rem; }
+.map-picture .map-field { margin-bottom: 0.45rem; }
+.map-picture-name { display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; margin-bottom: 0.45rem; min-width: 0; }
+.map-picture-name > i { color: var(--accent); flex: 0 0 auto; }
+.map-picture-name.map-warn > i { color: inherit; }
+.map-picture-name > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-picture-name .icon-btn { flex: 0 0 auto; }
+.map-picture-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.map-picture-actions .map-chip:disabled { opacity: 0.5; cursor: default; }
+.map-new-picture { margin-top: 0.5rem; }
+.map-new-picture .map-new-paste { margin-top: 0; }
+.map-new-picture .map-hint { margin: 0.3rem 0 0; }
 
 /* Borders: the map's look, the blend width, each terrain's own. */
 .map-borders-btn { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; flex: 0 0 auto; }
@@ -314,3 +396,61 @@
 }
 
 html[data-device="phone"] .map-live-banner { flex-wrap: wrap; padding: 0.4rem 0.6rem; }
+
+/* ---------------- World Builder: where you are, and the scene ---------------- */
+
+.map-world-strip {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.25rem 1rem;
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--panel-strong);
+}
+.map-world-strip .spacer { flex: 1 1 auto; }
+.map-world-up { flex: 0 0 auto; }
+
+.map-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+}
+.map-crumbs li { display: flex; align-items: center; gap: 0.2rem; min-width: 0; }
+/* The outer steps give way first; the map you are on keeps its name longest. */
+.map-crumbs li:not([aria-current]) { flex: 0 1 auto; }
+.map-crumbs li[aria-current] { flex: 0 0 auto; max-width: 45%; }
+
+.map-crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    max-width: 16rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+.map-crumb > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-crumb > i { color: var(--text-muted); flex: 0 0 auto; }
+button.map-crumb:hover { border-color: var(--border-color); color: var(--text-primary); }
+.map-crumb.current { color: var(--text-primary); font-weight: 600; max-width: none; }
+.map-crumb-sep { color: var(--text-muted); font-size: 0.6rem; flex: 0 0 auto; }
+
+.map-scene { display: flex; align-items: center; gap: 0.5rem; flex: 0 1 auto; min-width: 0; }
+.map-scene-elsewhere { max-width: 20rem; }
+.map-scene-btn { flex: 0 0 auto; padding: 0.25rem 0.7rem; font-size: 0.8rem; }
+.map-scene-on { display: inline-flex; align-items: center; gap: 0.45rem; color: #fecaca; font-weight: 600; white-space: nowrap; }
+
+html[data-device="phone"] .map-world-strip { flex-wrap: wrap; padding: 0.25rem 0.6rem; row-gap: 0.25rem; }
+html[data-device="phone"] .map-crumbs li[aria-current] { max-width: none; }

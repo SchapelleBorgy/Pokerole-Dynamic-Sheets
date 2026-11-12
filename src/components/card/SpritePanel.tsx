@@ -7,6 +7,8 @@ import { SPRITE_SET_BLOCKED } from '../../state/constants';
 import { readCustomImage } from '../../lib/fileSystem';
 import { MegaStoneIcon, megaStoneOf } from '../common/MonName';
 import { speciesGender } from '../../card/gender';
+import { homebrewLook } from '../../data/homebrew';
+import type { SpriteSet } from '../../data/homebrew';
 import type { SpriteFrames } from '../../data/types';
 
 /* The sprite box: the art itself, the set tabs under it, and the framing
@@ -52,8 +54,17 @@ export function SpritePanel({ onUpload }: { onUpload: () => void }) {
     const [fullRes, setFullRes] = useState<string | null>(null);
     const [fellBack, setFellBack] = useState(false);
 
+    /* A homebrew draws its own art for each set it has, and borrows the
+       rest from the official species it names. With nothing to borrow, only
+       the sets with art are open (Home, a Poké Ball, when there are none). */
+    const look = homebrewLook(pokemon.Image);
+    const image = look?.spriteOf || pokemon.Image;
+    const ownArt = (t: string) => look ? (look.arts[t as SpriteSet] || (look.spriteOf ? null : look.fallback)) : null;
+
     const blocked = (type: string) => {
-        const list = pokemon.Image && SPRITE_SET_BLOCKED[pokemon.Image];
+        if (look && look.arts[type as SpriteSet]) return false;
+        if (look && !look.spriteOf) return type !== 'Home' || Object.values(look.arts).some(Boolean);
+        const list = image && SPRITE_SET_BLOCKED[image];
         return !!list && list.indexOf(type) !== -1;
     };
 
@@ -63,7 +74,7 @@ export function SpritePanel({ onUpload }: { onUpload: () => void }) {
        than show a blank tab or the wrong Pokémon. */
     let type = sheet.spriteType || 'Home';
     if (type === 'Custom' && !hasCustom) type = 'Home';
-    if (blocked(type)) type = 'Home';
+    if (blocked(type)) type = SETS.map((x) => x.type as string).find((t) => !blocked(t)) || 'Home';
 
     const showingCustom = type === 'Custom';
 
@@ -75,18 +86,20 @@ export function SpritePanel({ onUpload }: { onUpload: () => void }) {
         return () => { live = false; };
     }, [showingCustom, sheet.customImageFile]);
 
-    useEffect(() => { setFellBack(false); }, [type, pokemon.Image]);
+    useEffect(() => { setFellBack(false); }, [type, image]);
 
     const scale = (sheet.spriteScales && sheet.spriteScales[type]) || 1;
     const off = sheet.spriteOffsets?.[type] || { x: 0, y: 0 };
-    const frame = spriteFrameOffset(data.spriteFrames, type, pokemon.Image);
+    const art = showingCustom ? null : ownArt(type);
+    /* Own art is framed by whoever drew it; only borrowed sprites are measured. */
+    const frame = spriteFrameOffset(data.spriteFrames, type, art ? '' : image);
 
     const set = SETS.find((s) => s.type === type);
     const src = showingCustom
         ? (fullRes || sheet.customImage)
-        : (fellBack
-            ? GITHUB_RAW + '/images/' + set!.folder + '/' + pokemon.Image
-            : IMG_BASE + set!.folder + '/' + pokemon.Image);
+        : art || (fellBack
+            ? GITHUB_RAW + '/images/' + set!.folder + '/' + image
+            : IMG_BASE + set!.folder + '/' + image);
 
     const spriteStyle: CSSProperties = {
         ['--sprite-frame-x' as string]: frame.x.toFixed(2) + 'px',

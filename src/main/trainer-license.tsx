@@ -16,6 +16,7 @@ import { installTooltips } from '../lib/tooltip';
 import { initDevice } from '../lib/device';
 import { startLive } from '../live/engine';
 import { licenseAdapter } from '../live/adapters';
+import { installReadOnlyGuard } from '../state/npcMode';
 import type { AppData } from '../data/types';
 
 import '../styles/trainer-license.css';
@@ -77,5 +78,6 @@ createRoot(document.getElementById('root')!).render(
 /* Replaces the browser's native title bubble everywhere on the page. DOM-level,
    so it covers whatever React renders without any component knowing about it. */
 installTooltips();
+installReadOnlyGuard();
 
 registerServiceWorker();

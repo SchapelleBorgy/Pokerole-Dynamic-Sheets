@@ -4,7 +4,9 @@ import { wildSheetKey } from '../../card/cardContext';
 
 /* Covers the card when it is opened with no Pokémon loaded. */
 
-export function BlankLanding({ onLoad, onWild }: { onLoad: () => void; onWild: () => void }) {
+export function BlankLanding({ onLoad, onWild, onHomebrew }: {
+    onLoad: () => void; onWild: () => void; onHomebrew: () => void;
+}) {
     const { data } = useAppData();
     const open = readWildOpen();
 
@@ -37,6 +39,9 @@ export function BlankLanding({ onLoad, onWild }: { onLoad: () => void; onWild: (
                 </button>
                 <button className="blank-btn wild" onClick={onWild}>
                     <i className="fa-solid fa-paw"></i> Manage a Wild Pokémon
+                </button>
+                <button className="blank-btn homebrew" id="homebrew-btn" onClick={onHomebrew}>
+                    <i className="fa-solid fa-flask"></i> Create a Homebrew Pokémon
                 </button>
                 {open.length > 0 && (
                     <button

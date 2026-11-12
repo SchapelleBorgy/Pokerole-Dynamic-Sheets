@@ -12,6 +12,8 @@ import { useTable } from '../../table/TableContext';
 import { FallbackImage } from '../common/FallbackImage';
 import { tileSpriteChain } from '../../lib/sprites';
 import type { WireTurnEntry } from '../../table/protocol';
+import { colorVars } from '../../table/colors';
+import type { CSSProperties } from 'react';
 
 const MAX_ACTIONS = 5;
 
@@ -53,14 +55,27 @@ export function TurnStrip() {
 
     useEffect(() => { if (!mineNow) setDelaying(false); }, [mineNow]);
 
-    if (!turns) return null;
+    if (!turns) {
+        /* The GM screen is there and has no fight on the table: say how to
+           put one on, since the players can roll no initiative until then. */
+        if (!state.isHost || !linked) return null;
+        return (
+            <section className="turn-strip turn-strip-idle" aria-label="Turn order" data-no-fight="" data-tour="turns">
+                <span className="muted">
+                    <i className="fa-solid fa-khanda"></i> No fight on the table. In the GM screen,
+                    press <i className="fa-solid fa-tower-broadcast" aria-label="Show on the table"></i> on
+                    a fight to show it here and let the players roll initiative.
+                </span>
+            </section>
+        );
+    }
 
     const curIndex = cur ? turns.order.indexOf(cur) : -1;
     /* Where a delay may go: later in this pass, behind somebody still to act. */
     const later = turns.order.filter((e, i) => i > curIndex && !e.done && !e.out);
 
     return (
-        <section className="turn-strip" aria-label="Turn order">
+        <section className="turn-strip" aria-label="Turn order" data-tour="turns">
             <div className="turn-head">
                 <span className="turn-title">
                     <i className="fa-solid fa-khanda"></i> {turns.name}
@@ -117,17 +132,24 @@ export function TurnStrip() {
             <div className="turn-rail" ref={rail}>
                 {turns.order.map((e) => {
                     const mine = !!e.own && e.own === state.myId;
+                    /* A player's character wears that player's colour. */
+                    const owner = e.own ? state.members.find((m) => m.id === e.own) : null;
+                    const colored = !!owner && owner.color !== undefined;
                     const cls = 'turn-entry'
                         + (e.id === turns.cur ? ' now' : '')
                         + (e.done ? ' done' : '')
                         + (e.out ? ' out' : '')
                         + (e.own ? ' ally' : ' foe')
-                        + (mine ? ' mine' : '');
+                        + (mine ? ' mine' : '')
+                        + (colored ? ' by-color' : '');
                     return (
-                        <div key={e.id} className={cls} aria-current={e.id === turns.cur ? 'step' : undefined}>
+                        <div
+                            key={e.id} className={cls} aria-current={e.id === turns.cur ? 'step' : undefined}
+                            style={colored ? colorVars(owner!.color) as CSSProperties : undefined}
+                        >
                             <div className="turn-face"><Face e={e} /></div>
                             <span className="turn-name">{e.name}</span>
-                            {mine && e.acted !== undefined && (
+                            {e.acted !== undefined && (
                                 <span className="turn-pips" aria-label={e.acted + ' of ' + MAX_ACTIONS + ' actions used'}>
                                     {Array.from({ length: MAX_ACTIONS }, (_, i) => (
                                         <span key={i} className={'turn-pip' + (i < e.acted! ? ' used' : '')}></span>

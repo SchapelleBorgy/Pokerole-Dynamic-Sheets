@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMap } from '../../map/MapContext';
 import { Modal, ModalClose } from '../common/Modal';
 import { useGmConfirm } from '../gm/ConfirmDialog';
@@ -9,7 +9,10 @@ import { COMMON_FOLDER, MAP_SPRITE_BASE, imageExists, terrainTextureUrl } from '
 import { MAX_CELLS, MIN_CELLS, clampCells, createDoc, uid } from '../../map/doc';
 import type { MapDoc, StyleId } from '../../map/types';
 import { buildNewMap } from '../../map/recipeBuild';
+import { KIND_ICON, KIND_LABEL, mapTree } from '../../map/world';
 import { RecipeCheck, useParsedRecipe } from './RecipeCheck';
+import { PICTURE_ACCEPT, importPicture, rowsFor } from '../../map/picture';
+import type { PictureInfo } from '../../map/picture';
 
 /* ------------------------------------------------------------- new map */
 
@@ -34,13 +37,39 @@ function NewMapForm({ onCreate, onRecipe }: { onCreate: (d: MapDoc) => void; onR
        recipe, and the settings above fill in whatever the recipe leaves out. */
     const [pasting, setPasting] = useState(false);
     const [reply, setReply] = useState('');
+    /* A map started from a picture takes the picture's shape: the rows
+       follow from the columns. */
+    const [pic, setPic] = useState<PictureInfo | null>(null);
+    const [picError, setPicError] = useState('');
+    const [picBusy, setPicBusy] = useState(false);
+    const picInput = useRef<HTMLInputElement>(null);
+    const shownRows = pic ? clampCells(rowsFor(clampCells(cols), pic)) : rows;
+    const choosePicture = async (file: File) => {
+        setPicBusy(true);
+        setPicError('');
+        try {
+            const info = await importPicture(file);
+            setPic(info);
+            /* About 64 pixels a cell to start with. */
+            setCols(clampCells(Math.round(info.w / 64)));
+            if (!name.trim()) setName(file.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 60));
+        } catch (e) {
+            setPicError((e as Error).message);
+        } finally {
+            setPicBusy(false);
+        }
+    };
     const base = { name: name.trim() || 'New map', cols: clampCells(cols), rows: clampCells(rows), styleId, background, scale };
     const { parsed, recipe, errors, empty } = useParsedRecipe(pasting ? reply : '', 'new', base);
     const fromRecipe = pasting && !!reply.trim();
 
     const create = () => {
         if (!fromRecipe) {
-            onCreate(createDoc({ name, cols: clampCells(cols), rows: clampCells(rows), background, styleId, scaleLabel: scale }));
+            const c = clampCells(cols), r = clampCells(shownRows);
+            onCreate(createDoc({
+                name, cols: c, rows: r, background, styleId, scaleLabel: scale,
+                picture: pic ? { id: pic.id, name: pic.name, x: 0, y: 0, w: c, h: r, opacity: 1 } : undefined,
+            }));
             return;
         }
         if (!recipe || empty) return;
@@ -76,15 +105,53 @@ function NewMapForm({ onCreate, onRecipe }: { onCreate: (d: MapDoc) => void; onR
                 </label>
                 <label className="map-field">
                     <span>Rows</span>
-                    <input type="number" min={MIN_CELLS} max={MAX_CELLS} value={rows} onChange={(e) => setRows(Number(e.currentTarget.value))} />
+                    <input
+                        type="number" min={MIN_CELLS} max={MAX_CELLS} value={shownRows} disabled={!!pic}
+                        title={pic ? 'Set by the picture\'s shape' : undefined}
+                        onChange={(e) => setRows(Number(e.currentTarget.value))}
+                    />
                 </label>
-                <label className="map-field">
-                    <span>Background</span>
-                    <select value={background} onChange={(e) => setBackground(e.currentTarget.value)}>
-                        {TERRAINS.map((t) => <option key={t.slug} value={t.slug}>{t.name}</option>)}
-                    </select>
-                </label>
+                {!pic && (
+                    <label className="map-field">
+                        <span>Background</span>
+                        <select value={background} onChange={(e) => setBackground(e.currentTarget.value)}>
+                            {TERRAINS.map((t) => <option key={t.slug} value={t.slug}>{t.name}</option>)}
+                        </select>
+                    </label>
+                )}
             </div>
+            {!pasting && (
+                <div className="map-new-picture">
+                    {pic ? (
+                        <div className="map-picture-name">
+                            <i className="fa-solid fa-image"></i>
+                            <span>{pic.name} <span className="muted">{pic.w}×{pic.h} px</span></span>
+                            <button className="icon-btn" aria-label="Start without the picture" onClick={() => setPic(null)}>
+                                <i className="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    ) : (
+                        <button className="map-new-paste" disabled={picBusy} onClick={() => picInput.current?.click()} data-new-picture>
+                            <i className={'fa-solid ' + (picBusy ? 'fa-spinner fa-spin' : 'fa-image')}></i> Start from a picture: a map drawn by hand or in another program
+                        </button>
+                    )}
+                    {pic && (
+                        <p className="map-hint">
+                            The picture lies under the whole map. Choose how many columns to lay over it; paint,
+                            mark and fog it like any map.
+                        </p>
+                    )}
+                    {picError && <p className="map-hint map-warn">{picError}</p>}
+                    <input
+                        ref={picInput} type="file" accept={PICTURE_ACCEPT} hidden data-new-picture-input
+                        onChange={(e) => {
+                            const file = e.currentTarget.files?.[0];
+                            e.currentTarget.value = '';
+                            if (file) void choosePicture(file);
+                        }}
+                    />
+                </div>
+            )}
             <label className="map-field">
                 <span>Scale</span>
                 <input type="text" value={scale} placeholder="e.g. 1 cell = 5 km" onChange={(e) => setScale(e.currentTarget.value)} />
@@ -136,12 +203,12 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
 
     useEffect(() => { if (open) { setRenaming(null); setCreating(false); } }, [open]);
 
-    const maps = [...store.maps].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const tree = mapTree(store.maps);
 
     return (
         <Modal open={open} onClose={onClose} boxClassName="map-dialog">
             <ModalClose onClick={onClose} />
-            <div className="map-dialog-title"><i className="fa-solid fa-layer-group"></i> Your maps</div>
+            <div className="map-dialog-title"><i className="fa-solid fa-layer-group"></i> Your worlds</div>
             {creating ? (
                 <NewMapForm onCreate={(d) => { store.addMap(d); onClose(); }} onRecipe={onRecipe} />
             ) : (
@@ -155,8 +222,11 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                 </div>
             )}
             <ul className="map-list">
-                {maps.map((m) => (
-                    <li key={m.id} className={m.id === store.activeId ? 'active' : ''}>
+                {tree.map(({ doc: m, depth }) => (
+                    <li
+                        key={m.id} className={(m.id === store.activeId ? 'active' : '') + (depth ? ' map-list-child' : '')}
+                        style={depth ? { marginLeft: depth * 18 } : undefined} data-kind={m.kind}
+                    >
                         {renaming === m.id ? (
                             <input
                                 type="text"
@@ -169,7 +239,10 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                             />
                         ) : (
                             <button className="map-list-open" onClick={() => { store.switchTo(m.id); onClose(); }} title="Open this map">
-                                <span className="map-list-name">{m.name || 'Untitled map'}</span>
+                                <span className="map-list-name">
+                                    {depth > 0 && <i className="fa-solid fa-turn-up fa-rotate-90 map-list-branch"></i>}
+                                    <i className={'fa-solid ' + KIND_ICON[m.kind]} title={KIND_LABEL[m.kind]}></i> {m.name || 'Untitled map'}
+                                </span>
                                 <span className="muted">
                                     {m.cols}×{m.rows} · {MAP_STYLES.find((s) => s.id === m.styleId)?.name}
                                     {' · '}{new Date(m.updatedAt).toLocaleDateString()}
@@ -179,7 +252,12 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                         <button className="icon-btn" title="Rename" onClick={() => setRenaming(m.id)}><i className="fa-solid fa-pen"></i></button>
                         <button
                             className="icon-btn" title="Duplicate"
-                            onClick={() => store.addMap({ ...m, id: uid(), name: m.name + ' (copy)', updatedAt: new Date().toISOString() })}
+                            onClick={() => store.addMap({
+                                /* A copy stands alone: its landmarks open nothing and it is entered from
+                                   nowhere, or two maps would share one city and its way out. */
+                                ...m, id: uid(), name: m.name + ' (copy)', updatedAt: new Date().toISOString(),
+                                parent: undefined, stamps: m.stamps.map((st) => (st.link ? { ...st, link: undefined } : st)),
+                            })}
                         >
                             <i className="fa-solid fa-clone"></i>
                         </button>
@@ -189,7 +267,9 @@ export function MapListDialog({ open, onClose, onRecipe }: { open: boolean; onCl
                                 const ok = await confirm({
                                     icon: 'fa-trash', danger: true, confirmLabel: 'Delete',
                                     title: 'Delete ' + (m.name || 'this map') + '?',
-                                    text: 'It is removed from this browser. A copy you saved to a file is not touched.',
+                                    text: 'It is removed from this browser. A copy you saved to a file is not touched.'
+                                        + (store.maps.some((c) => c.parent?.doc === m.id)
+                                            ? ' The cities and interiors opened from it stay, as maps of their own.' : ''),
                                 });
                                 if (ok) store.deleteMap(m.id);
                             }}

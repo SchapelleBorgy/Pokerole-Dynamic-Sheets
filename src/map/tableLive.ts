@@ -23,8 +23,11 @@ import type { MapDoc } from './types';
    - an update that uncovers more than `threshold` of the map, or clears the
      fog entirely, is HELD. Live stops until the GM publishes it or throws it
      away;
-   - live is bound to one map. Switching to another pauses it, and coming back
-     does not resume it on its own;
+   - live is bound to one map, the SCENE, by its id — never to whatever map
+     is open. The GM can go into a city or back out to the world while the
+     players keep seeing the scene; only "Show this scene" changes it (the
+     World Builder, 2026-11-08: before, switching maps paused live, because
+     live followed the open map);
    - when the table goes quiet, or the GM takes the map off it, live ends.
      The table holds several maps and shows one: a live map that is not the
      one on show keeps following, so it is up to date when the GM shows it.
@@ -84,6 +87,8 @@ export interface LiveState {
     revealHold: number;
     /** Live, with changes on the map that the players have not been sent. */
     pending: boolean;
+    /** The scene is the map open right now. */
+    here: boolean;
     /** What the table keeps off the live map's players' picture. */
     hide: PlayerHide | null;
 }
@@ -117,7 +122,7 @@ export class TableLiveLink {
         connected: false, table: '', shown: false, activeMap: null, mode: 'off', mapId: null, mapName: '', why: '', held: null,
         dueAt: null, busy: false, lastUrl: null, lastAt: null, error: '', threshold: loadThreshold(),
         auto: loadAuto(), editHold: loadHold(EDIT_HOLD_KEY, DEFAULT_EDIT_HOLD_MS),
-        revealHold: loadHold(REVEAL_HOLD_KEY, DEFAULT_REVEAL_HOLD_MS), pending: false, hide: null,
+        revealHold: loadHold(REVEAL_HOLD_KEY, DEFAULT_REVEAL_HOLD_MS), pending: false, hide: null, here: false,
     };
     /** The table's hide choices, by map id, from its last beat. */
     private hides: Record<string, PlayerHide> = {};
@@ -236,7 +241,7 @@ export class TableLiveLink {
         this.landed = false;
         this.published = null;
         this.publishedDoc = null;
-        this.set({ mode: 'off', mapId: null, mapName: '', held: null, dueAt: null, why: '', error: why, pending: false });
+        this.set({ mode: 'off', mapId: null, mapName: '', held: null, dueAt: null, why: '', error: why, pending: false, here: false });
     }
 
     /** The table changed what it keeps off the live map: the picture players
@@ -249,28 +254,32 @@ export class TableLiveLink {
 
     /* --------------------------------------------------------- the map side */
 
+    /** The map live follows, wherever the GM is. */
+    private scene(): MapDoc | null {
+        const id = this.state.mapId;
+        return id ? this.store.maps.find((m) => m.id === id) ?? null : null;
+    }
+
     private onStore(): void {
         const s = this.state;
-        if (s.mode !== 'live' || this.store.dragging) return;
-        if (this.store.activeId !== s.mapId) {
-            this.clearHold();
-            this.set({
-                mode: 'paused', dueAt: null,
-                why: 'You switched to another map, so live is paused. That map is not being shown.',
-            });
-            return;
-        }
-        const doc = this.store.doc;
+        const here = s.mode !== 'off' && this.store.activeId === s.mapId;
+        if (here !== s.here) this.set({ here });
+        if (s.mode === 'off') return;
+        const doc = this.scene();
+        if (!doc) { this.end('The map on show was deleted, so live ended.'); return; }
+        if (doc.name !== s.mapName) this.set({ mapName: doc.name });
+        /* A stroke or a drag on the scene is not a change until it ends. */
+        if (s.mode !== 'live' || (here && this.store.dragging)) return;
         if (doc === this.seenDoc) return;
         this.seenDoc = doc;
-        if (doc.name !== s.mapName) this.set({ mapName: doc.name });
         this.changed();
     }
 
     /** The map moved on from what players have: wait for Sync, or for the
         automatic wait. An undo back to what they have is no change at all. */
     private changed(): void {
-        const doc = this.store.doc;
+        const doc = this.scene();
+        if (!doc) return;
         const pending = doc !== this.publishedDoc;
         if (pending !== this.state.pending) this.set({ pending });
         if (!pending) { this.clearHold(); this.set({ dueAt: null }); return; }
@@ -297,8 +306,8 @@ export class TableLiveLink {
     private async due(): Promise<void> {
         if (this.state.mode !== 'live') return;
         if (this.sending) { this.syncAfter = true; return; }
-        const doc = this.store.doc;
-        if (doc.id !== this.state.mapId) { this.onStore(); return; }
+        const doc = this.scene();
+        if (!doc) { this.onStore(); return; }
         if (doc === this.publishedDoc) { this.set({ dueAt: null, pending: false }); return; }
 
         const stats = revealStats(this.published, doc);
@@ -310,7 +319,7 @@ export class TableLiveLink {
         await this.send(doc, true);
     }
 
-    private async send(doc: MapDoc, live: boolean): Promise<boolean> {
+    private async send(doc: MapDoc, live: boolean, scene: { show?: boolean; replaces?: string } = {}): Promise<boolean> {
         if (!this.state.connected) {
             this.set({ error: 'No rolling table is open in this browser.' });
             return false;
@@ -329,6 +338,7 @@ export class TableLiveLink {
             this.post({
                 t: 'image', seq, mapId: doc.id, title: doc.name || 'Map', live,
                 image: view.blob, w: view.width, h: view.height, objects: mapObjects(doc),
+                ...(scene.show ? { show: true } : {}), ...(scene.replaces ? { replaces: scene.replaces } : {}),
             });
             const reply = await ack;
             if (!reply.ok) {
@@ -346,7 +356,7 @@ export class TableLiveLink {
             }
             this.set({
                 busy: false, lastUrl: URL.createObjectURL(view.blob), lastAt: Date.now(),
-                pending: this.state.mode === 'live' && this.store.doc !== this.publishedDoc,
+                pending: this.state.mode === 'live' && this.scene() !== this.publishedDoc,
             });
             return true;
         } catch (e) {
@@ -358,8 +368,9 @@ export class TableLiveLink {
             /* First, so a change made meanwhile waits behind it as usual. */
             if (this.rehideAfter) { this.rehideAfter = false; this.rehide(); }
             /* Changed while it was being sent: that change waits its own turn. */
-            if (this.state.mode === 'live' && this.store.doc !== doc && this.store.activeId === this.state.mapId) {
-                this.seenDoc = this.store.doc;
+            const now = this.scene();
+            if (this.state.mode === 'live' && now && now !== doc && now.id === doc.id) {
+                this.seenDoc = now;
                 if (this.syncAfter) { this.syncAfter = false; void this.due(); }
                 else this.changed();
             }
@@ -376,16 +387,40 @@ export class TableLiveLink {
 
     /** Start following the map on screen. The caller asks first when the map
         has no fog at all (see `needsFogWarning`). */
-    async goLive(): Promise<void> {
+    async goLive(scene: { show?: boolean; replaces?: string } = {}): Promise<void> {
         const doc = this.store.doc;
         this.clearHold();
         this.landed = false;
         this.published = null;
         this.publishedDoc = null;
         this.seenDoc = doc;
-        this.set({ mode: 'live', mapId: doc.id, mapName: doc.name, why: '', held: null, error: '', hide: this.hides[doc.id] ?? null });
-        const ok = await this.send(doc, true);
-        if (!ok && this.state.mode === 'live') this.set({ mode: 'off', mapId: null });
+        this.set({
+            mode: 'live', mapId: doc.id, mapName: doc.name, why: '', held: null, error: '', here: true,
+            hide: this.hides[doc.id] ?? null,
+        });
+        const ok = await this.send(doc, true, scene);
+        if (!ok && this.state.mode === 'live') this.set({ mode: 'off', mapId: null, here: false });
+        /* The scene it was to take over from is followed no more either way. */
+        if (!ok && scene.replaces) this.post({ t: 'unlive', mapId: scene.replaces });
+    }
+
+    /** "Show this scene": the map on screen becomes what the players see.
+        Live moves to it and the table puts it on show; the scene before it
+        leaves the table. Already the scene: just make sure it is on show.
+        The caller asks first when the map has no fog (`needsFogWarning`). */
+    async showScene(): Promise<void> {
+        const doc = this.store.doc;
+        if (this.state.mode !== 'off' && this.state.mapId === doc.id) {
+            if (this.landed) this.post({ t: 'show', mapId: doc.id });
+            return;
+        }
+        const replaces = this.state.mode !== 'off' && this.state.mapId ? this.state.mapId : undefined;
+        await this.goLive({ show: true, replaces });
+    }
+
+    /** Whether the map on screen is the one players are looking at. */
+    isOnShow(id: string): boolean {
+        return this.state.connected && this.state.shown && this.state.activeMap === id;
     }
 
     /** Live with no fog shows everything — worth a question first. */
@@ -401,11 +436,7 @@ export class TableLiveLink {
 
     resume(): void {
         if (this.state.mode !== 'paused') return;
-        if (this.store.activeId !== this.state.mapId) {
-            this.set({ error: 'Switch back to “' + this.state.mapName + '” to resume it, or stop live.' });
-            return;
-        }
-        this.seenDoc = this.store.doc;
+        this.seenDoc = this.scene();
         this.set({ mode: 'live', why: '', error: '' });
         /* What changed while paused goes through the guard like any edit:
            at once when syncing by itself, on Sync otherwise. */
@@ -442,7 +473,7 @@ export class TableLiveLink {
         this.landed = false;
         this.published = null;
         this.publishedDoc = null;
-        this.set({ mode: 'off', mapId: null, mapName: '', why: '', held: null, dueAt: null, pending: false });
+        this.set({ mode: 'off', mapId: null, mapName: '', why: '', held: null, dueAt: null, pending: false, here: false });
         if (mapId) this.post({ t: 'unlive', mapId });
     }
 
@@ -450,8 +481,9 @@ export class TableLiveLink {
     async publishHeld(): Promise<void> {
         if (this.state.mode !== 'held') return;
         this.set({ mode: 'live', held: null });
-        if (this.store.activeId !== this.state.mapId) { this.onStore(); return; }
-        await this.send(this.store.doc, true);
+        const doc = this.scene();
+        if (!doc) { this.onStore(); return; }
+        await this.send(doc, true);
     }
 
     /** The GM threw the held update away. Live stays paused until they resume,

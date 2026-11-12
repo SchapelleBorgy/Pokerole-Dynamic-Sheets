@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useSheetStore } from '../../state/SheetContext';
 import { useTheme } from '../../hooks/useTheme';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
-import { useNatureRowAlignment } from '../../hooks/useNatureRowAlignment';
 import { PhotoArch } from './PhotoArch';
 import { LicensePlate } from './LicensePlate';
 import { CombatPills, SocialPills } from './StatPills';
@@ -33,6 +32,10 @@ import { ManualPicker } from './ManualPicker';
 import { useUpdateCheck } from '../../hooks/useUpdateCheck';
 import { useAppData } from '../../data/AppDataContext';
 import { openCard } from '../../lib/navigation';
+import { GuidedTour, useFirstTimeTour } from '../common/Tour';
+import { LICENSE_STEPS, LICENSE_TOUR_INTRO } from './tourSteps';
+import { NpcBanner } from '../common/NpcBanner';
+import { NPC_ID, WORKING_KEY } from '../../state/constants';
 
 /* The four quadrants of the licence, plus the notepad under them.
 
@@ -44,7 +47,6 @@ export function LicenseApp() {
 
     useTheme(sheet.themeType);
     useDocumentTitle(sheet.name);
-    useNatureRowAlignment([sheet.id, sheet.name, sheet.player]);
 
     const { data } = useAppData();
     const update = useUpdateCheck(data.version, data.repo);
@@ -63,14 +65,24 @@ export function LicenseApp() {
        changes back in when this tab regains focus. */
     useEffect(() => {
         const onFocus = () => store.syncFromStorage();
+        /* And at once while it is in view: the GM screen, the rolling table
+           (a player's change to a shared trainer, a Pokémon accepted as a
+           gift) and the cards all write the working set, and this page's own
+           next edit would otherwise write its older copy back over theirs. */
+        const onStorage = (e: StorageEvent) => { if (e.key === WORKING_KEY) store.syncFromStorage(); };
         window.addEventListener('focus', onFocus);
-        return () => window.removeEventListener('focus', onFocus);
+        window.addEventListener('storage', onStorage);
+        return () => {
+            window.removeEventListener('focus', onFocus);
+            window.removeEventListener('storage', onStorage);
+        };
     }, [store]);
 
     /* Warn before leaving with changes not written to disk. */
     useEffect(() => {
         const onLeave = (e: BeforeUnloadEvent) => {
-            if (store.anyDirty()) { e.preventDefault(); e.returnValue = ''; }
+            /* A GM's shared trainer is never saved to disk from here. */
+            if (!NPC_ID && store.anyDirty()) { e.preventDefault(); e.returnValue = ''; }
         };
         window.addEventListener('beforeunload', onLeave);
         return () => window.removeEventListener('beforeunload', onLeave);
@@ -78,11 +90,14 @@ export function LicenseApp() {
 
     const healingItem = (sheet.stats.clever || 0) + (sheet.skills.medicine || 0);
 
+    useFirstTimeTour('license');
+
     return (
         <>
             {/* Trainer switcher: edge arrows + a label, shown only when more
                 than one trainer is loaded from a folder */}
             <TrainerNav />
+            <NpcBanner />
 
             <main className="license-container">
 
@@ -106,8 +121,10 @@ export function LicenseApp() {
                     </div>
                 </section>
 
-                {/* QUADRANT 2: attributes, skills, achievements, nature & rank */}
-                <section className="panel">
+                {/* QUADRANT 2: attributes, skills, achievements, nature & rank,
+                    the badge case at the foot — the room between them is what
+                    the Extra box grows into */}
+                <section className="panel q2-panel">
                     <div className="q2-grid">
                         <CombatPills />
                         <SocialPills />
@@ -115,6 +132,10 @@ export function LicenseApp() {
                         <Achievements />
                         <NatureRank />
                         <ExtraPanel />
+                        <div className="badge-case">
+                            <div className="section-bar small">Gym Badge Case</div>
+                            <BadgeStrip onPick={setBadgeIndex} />
+                        </div>
                     </div>
                 </section>
 
@@ -140,8 +161,8 @@ export function LicenseApp() {
                     />
                 </section>
 
-                {/* QUADRANT 4: bag, potion satchel, badge case */}
-                <section className="panel">
+                {/* QUADRANT 4: bag, potion satchel, other stuff */}
+                <section className="panel q4-panel" data-tour="bag">
                     <div className="section-bar">Bag</div>
                     <BagColumns />
 
@@ -171,8 +192,6 @@ export function LicenseApp() {
                         </div>
                     </div>
 
-                    <div className="section-bar small" style={{ marginTop: '16px' }}>Gym Badge Case</div>
-                    <BadgeStrip onPick={setBadgeIndex} />
                 </section>
 
                 {/* Full-width notepad */}
@@ -204,6 +223,7 @@ export function LicenseApp() {
             <ManualPicker open={manualOpen} onClose={() => setManualOpen(false)} />
             <SessionDialogs />
             <LiveBridge />
+            <GuidedTour id="license" steps={LICENSE_STEPS} intro={LICENSE_TOUR_INTRO} />
         </>
     );
 }

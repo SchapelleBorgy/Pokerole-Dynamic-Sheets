@@ -1,6 +1,7 @@
 import { BOX_CAPACITY, BOX_SPRITE_CYCLE } from './constants';
 import { defaultBoxes, genUid } from './defaults';
 import type { BoxEntry, MonEntry, TrainerState } from './types';
+import { escapeHtml } from '../lib/html';
 
 /* PC storage: named boxes of Pokémon this trainer owns but isn't carrying.
 
@@ -75,7 +76,7 @@ export type MoveResult = { ok: true } | { ok: false; message?: string };
 
 const full = (name: string): MoveResult => ({
     ok: false,
-    message: '<i class="fa-solid fa-triangle-exclamation"></i> ' + name + ' is full.',
+    message: '<i class="fa-solid fa-triangle-exclamation"></i> ' + escapeHtml(name) + ' is full.',
 });
 
 /** Team slot -> box. `boxIdx` null means the open box, or the first with room. */
@@ -136,6 +137,29 @@ export function moveMonToBox(s: TrainerState, uid: string, boxIdx: number): Move
         return b;
     });
     return { ok: true };
+}
+
+/** A caught Pokémon joins the trainer: the first empty team slot, or — the
+    team full — the open box or the first with room, as in the games. Null
+    when there is no room anywhere. Used by the License's Capture button and
+    by a gift accepted at the rolling table, which works on a stored copy that
+    may not have been normalised, so a short team or missing boxes are made
+    good here. */
+export function addMonToTrainer(s: TrainerState, src: MonEntry): { where: 'team' | 'box'; box: string } | null {
+    const mon: MonEntry = { uid: genUid(), dexId: src.dexId, sheet: src.sheet || null, preview: src.preview || null };
+    const team = Array.isArray(s.team) ? s.team.slice() : [];
+    while (team.length < 6) team.push({ dexId: '', sheet: null, preview: null });
+    const idx = team.findIndex((t) => !t || !t.dexId);
+    if (idx !== -1) {
+        team[idx] = mon;
+        s.team = team;
+        return { where: 'team', box: '' };
+    }
+    if (!Array.isArray(s.boxes)) s.boxes = [];
+    const target = firstBoxWithRoom(s);
+    if (target === -1) return null;
+    s.boxes = s.boxes.map((b, i) => i === target ? { ...b, mons: [...b.mons, shedBoxThumbnail(mon)] } : b);
+    return { where: 'box', box: s.boxes[target].name };
 }
 
 export function swapTeamSlots(s: TrainerState, a: number, b: number): void {

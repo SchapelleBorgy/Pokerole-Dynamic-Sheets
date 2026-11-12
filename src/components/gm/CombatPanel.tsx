@@ -15,15 +15,20 @@ import {
     MAX_ACTIONS, initOffset, roundFlags, syncRoundState,
 } from '../../gm/combat';
 import {
-    adjustPool, entityPool, entityRef, participantToken as sharedParticipantToken, resolveToken, storedToken,
+    adjustPool, entityPool, entityRef, participantLook, participantToken as sharedParticipantToken, resolveToken,
+    storedToken,
     writeStatus,
 } from '../../gm/entities';
 import { PoolBar } from './RosterBits';
+import { StatsButton, statsKey } from './StatTip';
 import { canActIn } from '../../gm/tableCombat';
 import { parsePcToken, pruneTablePcs } from '../../gm/tablePcs';
-import { passTurn, pidOf, roundTurns, settleTurn, startTurns, stopTurns } from '../../gm/turns';
+import { actLogOf, passTurn, pidOf, roundTurns, settleTurn, startTurns, stopTurns, usedCount } from '../../gm/turns';
+import { clashLimit, evaLimit, modOf } from '../../lib/combatMods';
 import { useTablePresence } from '../../gm/useCombatLink';
-import type { GmCombat, GmCombatant, GmState } from '../../gm/types';
+import { clearPing, usePings } from '../../gm/rollPings';
+import { pcColorVars } from '../../table/colors';
+import type { ActLogEntry, GmCombat, GmCombatant, GmState } from '../../gm/types';
 import type { PokedexEntry } from '../../data/types';
 
 /* The combat tracker: initiative, five actions each, the status strip and the
@@ -134,7 +139,7 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
            included, so the history shows what it really rolled. The FIELD keeps
            the unparalysed number and the row shifts it for display, so curing
            the paralysis later puts the 2 back without a re-roll. */
-        const bonus = ref.value('Dexterity') + ref.value('Alert');
+        const bonus = ref.value('Dexterity') + ref.value('Alert') + modOf(ref.mods, 'init');
         const mod = initOffset(ref.status);
         store.update((s) => {
             const entry = roll(1, 6, {
@@ -294,7 +299,7 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
                                 ...c,
                                 round: next,
                                 participants: c.participants.map((p) => ({
-                                    ...p, acted: 0, usedClash: false, usedEva: false,
+                                    ...p, acted: 0, usedClash: 0, usedEva: 0, usedMoves: [], actLog: [],
                                 })),
                             }, canActIn(s, dexById)));
                         }}
@@ -369,8 +374,9 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
         >
             <div className="panel-body">
                 <div className="muted">
-                    Each combatant has <strong>{MAX_ACTIONS} actions</strong> per round — click the pips
-                    to track them. Enter each one's initiative roll by hand.
+                    Each combatant has <strong>{MAX_ACTIONS} actions</strong> per round. Rolling an
+                    Accuracy, an Evasion or a Clash fills a pip; click the pips to correct them.
+                    Hover a sprite for what it did this round.
                 </div>
                 <div className={'turn-bar' + (combat.turnsOn ? ' running' : '')}>
                     {combat.turnsOn ? (
@@ -378,7 +384,7 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
                             <span className="turn-now">
                                 <i className="fa-solid fa-play"></i>
                                 <span className="name-text">{current
-                                    ? String((current as unknown as Record<string, unknown>).label || '?')
+                                    ? participantLook(state, dexById, current).label || '?'
                                     : 'Every action spent — advance the round'}</span>
                             </span>
                             <span className="turn-pass">Pass {combat.pass}</span>
@@ -411,6 +417,17 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
                             </button>
                         </>
                     )}
+                    {/* The same switch as the header's tower, in words: until a
+                        fight is on the table its players cannot roll into it. */}
+                    {table.present && !onTable && (
+                        <button
+                            data-share-table=""
+                            title="Show this fight on the rolling table: the players see the turn order and can roll initiative into it"
+                            onClick={() => store.update((s) => { s.tableCombat = gid; })}
+                        >
+                            <i className="fa-solid fa-tower-broadcast"></i> Show on table
+                        </button>
+                    )}
                 </div>
                 <div id="combat-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
                     {!parts.length ? (
@@ -435,8 +452,12 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
                                 const n = parseInt(v, 10);
                                 return { ...x, init: isNaN(n) ? undefined : n };
                             })}
-                            onUsed={(key) => patch((p as unknown as Record<string, string>).pid,
-                                (x) => ({ ...x, [key]: !x[key] }))}
+                            onUsed={(key, limit) => patch((p as unknown as Record<string, string>).pid,
+                                /* One more each click, back to none past the allowance. */
+                                (x) => {
+                                    const n = usedCount(x[key]);
+                                    return { ...x, [key]: n >= limit ? 0 : n + 1 };
+                                })}
                             onRollInit={() => rollInitiative(
                                 resolveToken(state, participantToken(p)) || participantToken(p),
                                 (p as unknown as Record<string, string>).pid)}
@@ -494,9 +515,10 @@ export function CombatPanel({ combat, onReorder, onOpenTip, cycleStatus, extraAc
 }
 
 /* Clash and Evasion are once per Round each — and one Clash, whether it was
-   rolled off Strength or off Special — so what the row needs is a mark, not a
-   counter. Kept here beside the component that draws them so a third one is
-   added in one place. */
+   rolled off Strength or off Special — so what the row needs is a mark. A
+   character whose offsets allow more (Double Team, Detect…) gets a count on
+   the same button instead: "EVA 1/3". Kept here beside the component that
+   draws them so a third one is added in one place. */
 const USED_MARKS: { key: 'usedClash' | 'usedEva'; label: string; icon: string; tip: string }[] = [
     {
         key: 'usedClash', label: 'CLASH', icon: 'fa-hand-fist',
@@ -521,7 +543,7 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
     dexById: (id: string) => PokedexEntry | null;
     onPip: (i: number) => void;
     onInit: (v: string) => void;
-    onUsed: (key: 'usedClash' | 'usedEva') => void;
+    onUsed: (key: 'usedClash' | 'usedEva', limit: number) => void;
     onRollInit: () => void;
     onMove: (dir: number) => void;
     onRemove: () => void;
@@ -536,7 +558,10 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
     const status = ref ? ref.status : defaultStatus();
     const acted = (p.acted as number) || 0;
     const init = rec.init as number | null | undefined;
-    const dexId = rec.dexId as string | null;
+    /* What it is now: a Pokémon that Mega Evolved or evolved since it joined
+       shows its new sprite and name. */
+    const look = participantLook(state, dexById, p);
+    const dexId = look.dexId;
 
     const hp = ref ? entityPool(ref, 'hp') : null;
     const will = ref ? entityPool(ref, 'will') : null;
@@ -549,7 +574,8 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
     const shown = init == null ? '' : String(editing ? init : init + mod);
     /* A hand-typed combatant has no sheet behind it, so there is nothing to
        roll off — the GM types that one in, as they always did. */
-    const initBonus = ref && ref.kind !== 'custom' ? ref.value('Dexterity') + ref.value('Alert') : 0;
+    const initBonus = ref && ref.kind !== 'custom'
+        ? ref.value('Dexterity') + ref.value('Alert') + modOf(ref.mods, 'init') : 0;
     const canRollInit = init == null && !!ref && ref.kind !== 'custom';
     const flags = ref ? roundFlags(ref, p, round) : [];
     const kindIcon = rec.kind === 'trainer' ? 'fa-user'
@@ -559,16 +585,24 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
        places is never mistaken for one. */
     const pc = parsePcToken(String(rec.src || ''));
     const pcPlayer = pc ? (state.tablePcs[pc.member]?.player || 'Player') : '';
+    /* In the colour that player chose at the table. */
+    const pcStyle = pc ? pcColorVars(state.tablePcs[pc.member]?.color) as React.CSSProperties | undefined : undefined;
+    const pid = String(rec.pid || '');
+    const pings = usePings(pid);
 
     return (
         <div
             className={'combat-row ' + (acted >= MAX_ACTIONS ? 'spent' : '') + (moved ? ' just-moved' : '')
                 + (current ? ' c-turn' : '') + (pcPlayer ? ' c-pc' : '')}
+            style={pcStyle}
             data-tip={rec.kind !== 'trainer' && ref ? token : undefined}
         >
-            {dexId
-                ? <GmSprite dex={dexById(dexId)} dexId={dexId} className="c-sprite" />
-                : <i className={'fa-solid ' + kindIcon + ' c-icon'}></i>}
+            {/* Hover: what it did this Round, in order. */}
+            <span className="c-token" title={actLogHint(p)} data-tt-lines="" data-act-log="">
+                {dexId
+                    ? <GmSprite dex={dexById(dexId)} dexId={dexId} className="c-sprite" />
+                    : <i className={'fa-solid ' + kindIcon + ' c-icon'}></i>}
+            </span>
             {/* Everything but the sprite and the round flags stacks inside
                 here, in three bands that each get the row's full width:
                 name + initiative, the pools, then the action strip. The
@@ -578,7 +612,7 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
                 spilled out over the initiative field and the pips. */}
             <div className="c-main">
                 <div className="c-head">
-                    <div className="c-name" title={String(rec.label || '')}>{String(rec.label || '')}</div>
+                    <div className="c-name" title={look.label}>{look.label}</div>
                     <label className="c-init-wrap">
                         <span className="init-label">Init</span>
                         <input
@@ -626,7 +660,14 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
                             onCycle={(key, e) => cycleStatus(token, key, e)}
                         />
                     )}
-                    <div className="pips">
+                    {/* Lit when the player rolled an attack, an Evasion or a
+                        Clash for this one (its pip is already filled). Hover
+                        puts it out. */}
+                    <div
+                        className={'pips' + (pings.includes('row') ? ' pinged' : '')}
+                        data-ping={pings.includes('row') ? '' : undefined}
+                        onMouseEnter={() => clearPing(pid, 'row')}
+                    >
                         {Array.from({ length: MAX_ACTIONS }, (_, i) => (
                             <span
                                 key={i}
@@ -642,16 +683,25 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
                         behind it still clashes once a Round. */}
                     <div className="c-used">
                         {USED_MARKS.map((m) => {
-                            const on = !!p[m.key];
+                            const kind = m.key === 'usedEva' ? 'eva' : 'clash';
+                            const limit = kind === 'eva' ? evaLimit(ref?.mods) : clashLimit(ref?.mods);
+                            const n = Math.min(limit, usedCount(p[m.key]));
+                            const on = n >= limit;
+                            const lit = pings.includes(kind);
                             return (
                                 <button
                                     key={m.key}
-                                    className={'used-mark' + (on ? ' on' : '')}
+                                    className={'used-mark' + (on ? ' on' : n ? ' part' : '') + (lit ? ' pinged' : '')}
                                     aria-pressed={on}
-                                    title={on ? 'Used this Round' : m.tip}
-                                    onClick={() => onUsed(m.key)}
+                                    data-used={n}
+                                    title={limit > 1
+                                        ? n + ' of ' + limit + ' this Round — click to count one more'
+                                        : (on ? 'Used this Round' : m.tip)}
+                                    onMouseEnter={() => clearPing(pid, kind)}
+                                    onClick={() => onUsed(m.key, limit)}
                                 >
                                     <i className={'fa-solid ' + m.icon}></i>{m.label}
+                                    {limit > 1 && <span className="used-count">{n}/{limit}</span>}
                                 </button>
                             );
                         })}
@@ -694,6 +744,10 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
                             <i className={'fa-solid '
                                 + (rec.kind === 'trainer' ? 'fa-dice-d6' : 'fa-list-ul')}></i>
                         </button>
+                    )}
+                    {ref && ref.kind !== 'custom' && (
+                        <StatsButton token={token} mods={ref.mods} className="c-tip"
+                            onOpen={() => onOpenTip(statsKey(token))} />
                     )}
                     <button className="c-remove danger" title="Remove from combat" onClick={onRemove}>
                         <i className="fa-solid fa-xmark"></i>
@@ -746,6 +800,18 @@ function CombatRow({ p, moved, current, idx, total, round, token, dexById, onPip
             )}
         </div>
     );
+}
+
+const ACT_NAMES: Record<ActLogEntry['k'], string> = {
+    acc: 'Attack', eva: 'Evasion', clash: 'Clash', turn: 'Turn, no roll',
+};
+
+/** The hover on a combatant's sprite: each action done this Round, in the
+    order it was done — the move an Accuracy was for, an Evasion, a Clash. */
+function actLogHint(p: GmCombatant): string {
+    const log = actLogOf(p);
+    const lines = log.map((e, i) => (i + 1) + '. ' + (e.k === 'acc' && e.move ? e.move : ACT_NAMES[e.k]));
+    return 'This Round\n' + (lines.length ? lines.join('\n') : 'No action yet');
 }
 
 function escapeHtml(str: string): string {

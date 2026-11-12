@@ -10,15 +10,23 @@ import { NpcPanel } from './NpcPanel';
 import { NotesPanel } from './NotesPanel';
 import { GeneratorPanel } from './GeneratorPanel';
 import { MovePanel } from './MovePanel';
+import { StatPanel } from './StatPanel';
+import { splitTipKey, statsKey } from './StatTip';
+import { useTipButtonState } from './MoveTip';
 import { AilmentPopover } from './AilmentPopover';
 import { cycleStatus } from '../../gm/entities';
 import { useCombatLink } from '../../gm/useCombatLink';
+import { useGiftResults } from '../../gm/useGiftResults';
 import { WORKING_KEY } from '../../state/constants';
 import { GM_KEY } from '../../gm/constants';
+import { WILD_OPEN_KEY } from '../../card/cardContext';
 import { ActivePanelCtx, panelTabs } from '../../gm/phoneBoard';
 import { combatGidOf, isCombatPanelKey } from '../../gm/constants';
 import { useDeviceClass } from '../../lib/device';
 import type { PokedexEntry } from '../../data/types';
+import { useTour } from '../../lib/tour';
+import { GuidedTour, useFirstTimeTour } from '../common/Tour';
+import { GM_STEPS, GM_TOUR_INTRO } from './tourSteps';
 
 /* The board: six panels side by side, in whatever order and at whatever widths
    the GM has left them. */
@@ -32,7 +40,11 @@ export function GmApp({ dataOk, embedded, combatActions }: {
 }) {
     const { state, store } = useGm();
     const { data } = useAppData();
+    /* One popup at a time: a token opens its move panel, `statsKey(token)`
+       its stats popup (StatTip.tsx). */
     const [tipToken, setTipToken] = useState<string | null>(null);
+    const tip = splitTipKey(tipToken);
+    useTipButtonState(tipToken);
 
     /* The phone board shows one panel at a time behind a tab bar — five
        390px panels side by side on a 412px screen means four of them are
@@ -46,6 +58,8 @@ export function GmApp({ dataOk, embedded, combatActions }: {
 
     /* The fight on the rolling table, when one is hosted in this browser. */
     useCombatLink(store, dexById);
+    /* Wild Pokémon given to players there, and their answers. */
+    useGiftResults(store);
 
     /* Keeping the roster in step with the trainer sheet.
 
@@ -64,7 +78,7 @@ export function GmApp({ dataOk, embedded, combatActions }: {
         let lastSeen = localStorage.getItem(WORKING_KEY);
         const refresh = () => store.refresh();
         const onStorage = (e: StorageEvent) => {
-            if (e.key === WORKING_KEY || (e.key || '').indexOf('pokerole_wild_') === 0) refresh();
+            if (e.key === WORKING_KEY || e.key === WILD_OPEN_KEY || (e.key || '').indexOf('pokerole_wild_') === 0) refresh();
             /* The same board open in a second page (the GM screen beside the
                rolling table): take its save rather than overwrite it with
                this page's older copy on the next edit here. */
@@ -150,6 +164,19 @@ export function GmApp({ dataOk, embedded, combatActions }: {
        on a tab that shows nothing at all. */
     const active = tabs.some((t) => t.key === activeTab) ? activeTab : (tabs[0]?.key ?? 'roster');
 
+    /* On the rolling table the table's own tour runs instead. */
+    useFirstTimeTour('gm', !embedded);
+
+    /* On a phone a tour step names the tab its panel is in; 'combat' is
+       whichever fight comes first. */
+    const tourView = useTour().view;
+    useEffect(() => {
+        if (!tourView) return;
+        const key = tourView === 'combat' ? tabs.find((t) => isCombatPanelKey(t.key))?.key : tourView;
+        if (key && tabs.some((t) => t.key === key)) setActiveTab(key);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tourView]);
+
     return (
         <>
             <TopBar embedded={embedded} />
@@ -190,8 +217,12 @@ export function GmApp({ dataOk, embedded, combatActions }: {
                 </SideScroll>
             </ActivePanelCtx.Provider>
 
-            <MovePanel token={tipToken} onClose={() => setTipToken(null)} />
+            <MovePanel token={tip.stats ? null : tip.token} onClose={() => setTipToken(null)}
+                onStats={(t) => setTipToken(statsKey(t))} />
+            <StatPanel token={tip.stats ? tip.token : null} onClose={() => setTipToken(null)}
+                onMoves={(t) => setTipToken(t)} />
             <AilmentPopover />
+            {!embedded && <GuidedTour id="gm" steps={GM_STEPS} intro={GM_TOUR_INTRO} />}
         </>
     );
 }

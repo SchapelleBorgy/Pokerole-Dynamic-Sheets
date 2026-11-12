@@ -179,7 +179,7 @@ const TERRAIN_SYNONYMS: Record<string, string> = {
     marsh: 'swamp', bog: 'swamp', wetland: 'swamp', sand: 'beach', grass: 'grassland', plains: 'grassland',
     meadow: 'grassland', field: 'grassland', woods: 'forest', trees: 'forest', rainforest: 'jungle',
     dunes: 'desert', canyon: 'badlands', mesa: 'badlands', ice: 'snow', glacier: 'snow', mountains: 'mountain',
-    hills: 'mountain', rock: 'mountain', peaks: 'snow-mountain', 'snowy-mountain': 'snow-mountain', 'snowy-peaks': 'snow-mountain', alpine: 'snow-mountain', lava: 'volcanic', volcano: 'volcanic', cave: 'cave-floor',
+    hill: 'hills', downs: 'hills', foothills: 'hills', rock: 'mountain', peaks: 'snow-mountain', 'snowy-mountain': 'snow-mountain', 'snowy-peaks': 'snow-mountain', alpine: 'snow-mountain', lava: 'volcanic', volcano: 'volcanic', cave: 'cave-floor',
     town: 'town-paving', city: 'town-paving', street: 'town-paving', path: 'road', sky: 'clouds',
 };
 const LANDMARK_SLUGS = LANDMARKS.map((l) => l.slug);
@@ -601,7 +601,7 @@ function round(n: number): number {
 /** The issues, written for the assistant that wrote the recipe. */
 export function issuesForAssistant(issues: RecipeIssue[]): string {
     const lines = issues.map((i) => `- ${i.level === 'error' ? 'ERROR' : 'warning'} at ${i.where}: ${i.message}`);
-    return 'The Map Maker checked your recipe and found these problems. ERROR items were left out of the map; '
+    return 'The World Builder checked your recipe and found these problems. ERROR items were left out of the map; '
         + 'warnings were adjusted as described.\n\n' + lines.join('\n')
         + '\n\nReply with the whole corrected recipe as one ```json code block, following the same instructions as before.';
 }

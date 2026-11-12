@@ -33,6 +33,8 @@
 
 export interface Env {
     TABLE_ROOM: DurableObjectNamespace;
+    /** The usage counter. Optional: without the binding nothing is counted. */
+    STATS?: AnalyticsEngineDataset;
 }
 
 /* Big enough for a joiner's history sync — 30 rolls of up to 99 dice, encrypted
@@ -51,6 +53,13 @@ const RATE_MAX = 40;
    hold connections open on a free plan. Clients heartbeat every 25s. */
 const IDLE_MS = 6 * 60 * 60 * 1000;
 
+/* The idle wipe takes the files but keeps the claim (the hash of the GM's
+   upload key) this much longer. Wiped with the rest, the claim reopened after
+   every six quiet hours, and a player with the password could take it between
+   two sessions with one request — the GM could then share no map or music on
+   that table again. Kept, it costs ~100 bytes a room. */
+const CLAIM_KEEP_MS = 90 * 24 * 60 * 60 * 1000;
+
 /* 160 bits of room address, base32. Anything else is not one of ours, and is
    refused before a Durable Object is ever created — otherwise a crawler could
    spawn actors just by walking URLs. */
@@ -64,6 +73,13 @@ const ADDR_RE = /^[A-Z2-7]{32}$/;
 const MAX_PART_BYTES = 1024 * 1024;
 const MAX_PARTS = 64;
 const ROOM_QUOTA_BYTES = 256 * 1024 * 1024;
+
+/* Every request is what the free plan counts, not every byte, so parts travel
+   in batches: `?from=<i>&n=<k>` reads up to BATCH_PARTS of them in one GET, and
+   `?from=<i>` writes as many in one PUT. A batch is each part prefixed by its
+   length (4 bytes, big-endian). The one-part routes stay for older pages. */
+const BATCH_PARTS = 8;
+const MAX_BATCH_BYTES = BATCH_PARTS * (MAX_PART_BYTES + 4);
 
 /* 128 random bits, hex. The client draws it; anything else is refused. */
 const BLOB_ID_RE = /^[a-f0-9]{32}$/;
@@ -79,8 +95,80 @@ const CORS: Record<string, string> = {
     'Access-Control-Max-Age': '86400',
 };
 
+/* The pages that may use the relay from a browser: the site, and a page
+   served from this machine while it is worked on. A browser always says
+   which page a socket or a cross-origin request comes from, and the page
+   cannot change it — so another website cannot have its visitors' browsers
+   spend this account's daily allowance through the relay. A program outside
+   a browser can claim anything, or nothing; for those the limits are what
+   count, so a request that names no origin is let through. */
+const SITE_ORIGINS = ['https://tearmoon96.github.io'];
+const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/;
+
+function originAllowed(req: Request): boolean {
+    const origin = req.headers.get('Origin');
+    return origin === null || SITE_ORIGINS.includes(origin) || LOCAL_ORIGIN.test(origin);
+}
+
+/* The idle alarm is a storage write. Moved on every message it would cost a
+   write per roll, so a busy table moves it at most this often; the idle wipe
+   comes at most this much sooner than IDLE_MS after the last message. */
+const REARM_MS = 5 * 60 * 1000;
+
+/* The usage counter. Two kinds of data point, and only numbers in either:
+
+   - `join`: a socket opened. double1 = how many are in the room with it.
+   - `session`: a room emptied (or was wiped idle). double1 = the most people
+     it held at once, double2 = minutes from its first socket to its last.
+
+   Both also carry three words of what connected (see `whoOf`): the page's
+   build, `gm` / `pl` / `door` (a GM's page keeping a room open after a
+   password change), and whether its tab was hidden. A `session` carries in
+   double3 the close code of its last socket (1000 left, 1001 the page went
+   away, 1006 the connection dropped; 0 when nobody closed it). None of it
+   names a person, a table or a device.
+
+   A session's peak is the honest head count: a reload or a dropped Wi-Fi is
+   a second `join` but not a second person. A GM preparing alone and reloading
+   makes sessions of one, so the query script counts tables of two or more.
+   The room's own record (`STATS_KEY`) is deleted when the session is counted,
+   and with everything else in an idle wipe. */
+const STATS_KEY = 'stats';
+
+interface RoomStats {
+    /** When the session's first socket opened. */
+    start: number;
+    /** The most open sockets seen at once. */
+    peak: number;
+    /** Last sign of life: a join, a leave, or a move of the idle alarm. */
+    seen: number;
+}
+
 function text(body: string, status: number): Response {
     return new Response(body, { status, headers: CORS });
+}
+
+/** A request's body, or null when it is longer than `max` bytes — read to its
+    end either way, but never more than `max` of it held in memory (reading a
+    100 MB upload whole to find it too big held all of it first). Never
+    cancelled: a response sent over an unread or cancelled upload makes the
+    runtime fail reading it afterwards, and makes `wrangler dev` exit. */
+async function readCapped(req: Request, max: number): Promise<ArrayBuffer | null> {
+    if (!req.body) return new ArrayBuffer(0);
+    const reader = req.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size <= max) chunks.push(value);
+    }
+    if (size > max) return null;
+    const out = new Uint8Array(size);
+    let at = 0;
+    for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+    return out.buffer;
 }
 
 export default {
@@ -99,6 +187,10 @@ export default {
         }
 
         if (!url.pathname.startsWith('/room/')) return text('not found', 404);
+        if (!originAllowed(req)) {
+            await readCapped(req, 0);
+            return text('not from this site', 403);
+        }
         const [addr, ...rest] = url.pathname.slice('/room/'.length).split('/');
         if (!ADDR_RE.test(addr)) return text('bad room address', 400);
 
@@ -108,26 +200,66 @@ export default {
             return env.TABLE_ROOM.get(env.TABLE_ROOM.idFromName(addr)).fetch(req);
         }
 
-        /* The file store: `claim`, `blob/<id>` and `blob/<id>/<part>`. Shapes
-           are checked here, before a Durable Object is woken for them. */
-        const okShape = (rest.length === 1 && rest[0] === 'claim')
+        /* The file store: `claim`, `blobs`, `blob/<id>` and `blob/<id>/<part>`.
+           Shapes are checked here, before a Durable Object is woken for them. */
+        const okShape = (rest.length === 1 && (rest[0] === 'claim' || rest[0] === 'blobs'))
             || (rest[0] === 'blob' && rest.length >= 2 && rest.length <= 3 && BLOB_ID_RE.test(rest[1])
                 && (rest.length === 2 || /^\d{1,2}$/.test(rest[2])));
-        /* A body is always read to the end, here, before anything answers:
-           a response sent over an unread upload makes the runtime fail
-           reading it afterwards (and `wrangler dev` exits outright). The
-           part limit keeps that read small. */
-        let body: ArrayBuffer | null = null;
-        if (req.method === 'PUT' || req.method === 'POST') {
-            body = await req.arrayBuffer();
-            if (body.byteLength > MAX_PART_BYTES) return text('part too large', 413);
+        /* A body is always read to the end before anything answers: a
+           response sent over an unread upload makes the runtime fail reading
+           it afterwards (and `wrangler dev` exits outright). A request that
+           goes no further is drained here; one that does is handed on
+           unread, and the room reads it — this side has 10 ms of CPU, which
+           copying an 8 MB batch could eat into. */
+        if (!okShape) {
+            await readCapped(req, 0);
+            return text('not found', 404);
         }
-        if (!okShape) return text('not found', 404);
-
+        const upload = req.method === 'PUT' || req.method === 'POST';
+        if (!upload) await readCapped(req, 0);
         return env.TABLE_ROOM.get(env.TABLE_ROOM.idFromName(addr)).fetch(
-            body === null ? req : new Request(req.url, { method: req.method, headers: req.headers, body }));
+            new Request(req.url, { method: req.method, headers: req.headers, body: upload ? req.body : null }));
     },
 };
+
+/** `?from=<i>&n=<k>` on a blob, or null when there is none or it is out of
+    range. `n` is 1 when absent (a PUT says how many by its body). */
+function batchOf(url: URL): { from: number; n: number } | null {
+    const from = url.searchParams.get('from');
+    if (from === null || !/^\d{1,2}$/.test(from)) return null;
+    const raw = url.searchParams.get('n');
+    const n = raw === null ? 1 : /^\d{1,2}$/.test(raw) ? Number(raw) : 0;
+    if (n < 1 || n > BATCH_PARTS || Number(from) + n > MAX_PARTS) return null;
+    return { from: Number(from), n };
+}
+
+/** Splits a batch body into its parts. Null when the framing is wrong. */
+function unframe(body: ArrayBuffer): ArrayBuffer[] | null {
+    const view = new DataView(body);
+    const parts: ArrayBuffer[] = [];
+    let at = 0;
+    while (at < body.byteLength) {
+        if (at + 4 > body.byteLength || parts.length >= BATCH_PARTS) return null;
+        const len = view.getUint32(at);
+        at += 4;
+        if (len === 0 || len > MAX_PART_BYTES || at + len > body.byteLength) return null;
+        parts.push(body.slice(at, at + len));
+        at += len;
+    }
+    return parts.length ? parts : null;
+}
+
+function frame(parts: ArrayBuffer[]): Uint8Array {
+    const out = new Uint8Array(parts.reduce((n, p) => n + 4 + p.byteLength, 0));
+    const view = new DataView(out.buffer);
+    let at = 0;
+    for (const p of parts) {
+        view.setUint32(at, p.byteLength);
+        out.set(new Uint8Array(p), at + 4);
+        at += 4 + p.byteLength;
+    }
+    return out;
+}
 
 /** Per-socket bookkeeping. Kept on the socket itself so the room can hibernate
     between messages instead of holding memory open for an idle table. */
@@ -136,10 +268,103 @@ interface SocketMeta {
     n: number;
     /** When the current window opened. */
     since: number;
+    /** What connected, for the counter: build, role, hidden. */
+    who?: string[];
+}
+
+/** The counter's three words for a socket, from what its page put on the
+    URL. Anything unexpected is a plain '-': an older page sends none of it. */
+function whoOf(url: URL): string[] {
+    const v = url.searchParams.get('v') ?? '';
+    const r = url.searchParams.get('r') ?? '';
+    const h = url.searchParams.get('h');
+    return [
+        /^\d{1,3}(\.\d{1,3}){0,3}$/.test(v) ? v : '-',
+        r === 'gm' || r === 'pl' || r === 'door' ? r : '-',
+        h === '1' ? 'hidden' : h === '0' ? 'visible' : '-',
+    ];
 }
 
 export class TableRoom implements DurableObject {
-    constructor(private state: DurableObjectState) {}
+    /** When this object last moved its idle alarm. Kept in memory only: an
+        object woken from hibernation starts at 0 and moves it on its first
+        message, which is all the bookkeeping needs. */
+    private armedAt = 0;
+
+    constructor(private state: DurableObjectState, private env: Env) {}
+
+    /** Pushes the idle wipe IDLE_MS into the future — at most once every
+        REARM_MS, since each move is a storage write. */
+    private async rearm(now: number): Promise<void> {
+        if (now - this.armedAt < REARM_MS) return;
+        this.armedAt = now;
+        /* Best effort, like the counter: storage that refuses writes must not
+           cost anyone their socket — the relay can still relay. */
+        try {
+            await this.state.storage.setAlarm(now + IDLE_MS);
+            /* Activity calls off a kept claim's expiry (see alarm). A room that
+               never used the file store has no table to delete from. */
+            try { this.sql.exec("DELETE FROM meta WHERE k = 'expire'"); } catch { /* no file store */ }
+            const stats = await this.state.storage.get<RoomStats>(STATS_KEY);
+            if (stats) await this.state.storage.put(STATS_KEY, { ...stats, seen: now });
+        } catch { /* the next activity tries again */ }
+    }
+
+    /* ------------------------------------------------------- the counter */
+
+    /** One data point. Never throws: counting must not cost a table a socket. */
+    private count(kind: 'join' | 'session', doubles: number[], who: string[] = []): void {
+        try {
+            this.env.STATS?.writeDataPoint({ blobs: [kind, ...who], doubles, indexes: [kind] });
+        } catch { /* the counter is best effort */ }
+    }
+
+    /** Sockets still open, leaving out `except` (the one going away). */
+    private openSockets(except?: WebSocket): number {
+        return this.state.getWebSockets().filter((w) => w !== except && w.readyState === WebSocket.OPEN).length;
+    }
+
+    /** Counts a finished session and forgets it. `code` and `who` are the
+        last socket's, when one closed. */
+    private async endSession(stats: RoomStats, end: number, code = 0, who: string[] = []): Promise<void> {
+        this.count('session', [stats.peak, Math.max(0, Math.round((end - stats.start) / 60_000)), code], who);
+        await this.state.storage.delete(STATS_KEY);
+    }
+
+    /** A socket just opened: `n` are open now, itself included. */
+    private async joined(n: number, now: number, who: string[]): Promise<void> {
+        this.count('join', [n], who);
+        /* Never throws: this runs before the socket is handed back, so a
+           storage write refused here would keep everyone out of the table. */
+        try {
+            await this.track(n, now);
+        } catch { /* the counter is best effort */ }
+    }
+
+    private async track(n: number, now: number): Promise<void> {
+        let stats = await this.state.storage.get<RoomStats>(STATS_KEY);
+        /* Alone in a room that still has a session: the last one ended
+           without a close reaching us (a redeploy, an eviction). Count it
+           as of its last sign of life, and start afresh. */
+        if (stats && n === 1) {
+            await this.endSession(stats, stats.seen);
+            stats = undefined;
+        }
+        stats = stats
+            ? { ...stats, peak: Math.max(stats.peak, n), seen: now }
+            : { start: now, peak: n, seen: now };
+        await this.state.storage.put(STATS_KEY, stats);
+    }
+
+    /** A socket went away; the last one out ends the session. */
+    private async left(ws: WebSocket, code: number): Promise<void> {
+        if (this.openSockets(ws) > 0) return;
+        try {
+            const stats = await this.state.storage.get<RoomStats>(STATS_KEY);
+            const who = (ws.deserializeAttachment() as SocketMeta | null)?.who ?? [];
+            if (stats) await this.endSession(stats, Date.now(), code, who);
+        } catch { /* the counter is best effort */ }
+    }
 
     async fetch(req: Request): Promise<Response> {
         const rest = new URL(req.url).pathname.split('/').slice(3);
@@ -156,9 +381,11 @@ export class TableRoom implements DurableObject {
            so an idle table costs nothing. It is also why per-socket state is
            serialised onto the socket rather than kept in a field. */
         this.state.acceptWebSocket(server);
-        server.serializeAttachment({ n: 0, since: Date.now() } satisfies SocketMeta);
+        const who = whoOf(new URL(req.url));
+        server.serializeAttachment({ n: 0, since: Date.now(), who } satisfies SocketMeta);
 
-        await this.state.storage.setAlarm(Date.now() + IDLE_MS);
+        await this.joined(this.openSockets(), Date.now(), who);
+        await this.rearm(Date.now());
 
         return new Response(null, { status: 101, webSocket: pair[0] });
     }
@@ -208,19 +435,45 @@ export class TableRoom implements DurableObject {
             }
         }
 
-        await this.state.storage.setAlarm(now + IDLE_MS);
+        await this.rearm(now);
     }
 
-    webSocketError(ws: WebSocket): void {
+    async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+        /* 1005 and 1006 mean "no code" and may not be sent back. */
+        try { ws.close(code === 1005 || code === 1006 ? 1000 : code, reason); } catch { /* already gone */ }
+        await this.left(ws, code);
+    }
+
+    async webSocketError(ws: WebSocket): Promise<void> {
         try { ws.close(1011, 'socket error'); } catch { /* already gone */ }
+        await this.left(ws, 1006);
     }
 
+    /** Two alarms: the idle wipe, IDLE_MS after the last activity, and —
+        for a room whose file store was claimed — the claim's expiry,
+        CLAIM_KEEP_MS after that, unless activity called it off first. */
     async alarm(): Promise<void> {
+        /* No alarm is set any more: the next activity must set one. */
+        this.armedAt = 0;
+        this.schema();
+        const now = Date.now();
         for (const ws of this.state.getWebSockets()) {
             try { ws.close(1001, 'table idle'); } catch { /* already gone */ }
         }
-        /* An abandoned table's files and upload key go with it. */
-        await this.state.storage.deleteAll();
+        const expire = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'expire'").toArray()[0];
+        const claimed = this.sql.exec("SELECT v FROM meta WHERE k = 'key'").toArray().length > 0;
+        if (!claimed || (expire && now >= Number(expire.v))) {
+            /* Nothing worth keeping, or kept long enough: all of it goes. */
+            await this.state.storage.deleteAll();
+            return;
+        }
+        const stats = await this.state.storage.get<RoomStats>(STATS_KEY);
+        if (stats) this.count('session', [stats.peak, Math.max(0, Math.round((stats.seen - stats.start) / 60_000))]);
+        await this.state.storage.delete(STATS_KEY);
+        /* An abandoned table's files go; its claim stays theirs. */
+        this.sql.exec('DELETE FROM blobs');
+        this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('expire', ?)", String(now + CLAIM_KEEP_MS));
+        await this.state.storage.setAlarm(now + CLAIM_KEEP_MS);
     }
 
     /* ------------------------------------------------------- the file store */
@@ -251,7 +504,11 @@ export class TableRoom implements DurableObject {
     private async files(req: Request, rest: string[]): Promise<Response> {
         this.schema();
         /* Read before anything can answer — see the note in the Worker. */
-        const data = req.method === 'PUT' || req.method === 'POST' ? await req.arrayBuffer() : null;
+        let data: ArrayBuffer | null = null;
+        if (req.method === 'PUT' || req.method === 'POST') {
+            data = await readCapped(req, MAX_BATCH_BYTES);
+            if (data === null) return text('part too large', 413);
+        }
         return this.route(req, rest, data);
     }
 
@@ -272,8 +529,38 @@ export class TableRoom implements DurableObject {
             return text('ok', 200);
         }
 
+        /* Every file in the room and how many parts of each are here: the
+           GM's one look at what survived, rather than one look per file. */
+        if (rest[0] === 'blobs') {
+            if (req.method !== 'GET') return text('method not allowed', 405);
+            const files: Record<string, number> = {};
+            for (const r of this.sql.exec<{ id: string; n: number }>('SELECT id, COUNT(*) AS n FROM blobs GROUP BY id')) {
+                files[r.id] = r.n;
+            }
+            return new Response(JSON.stringify({ files }), {
+                headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS },
+            });
+        }
+
         const id = rest[1];
         const part = rest.length === 3 ? Number(rest[2]) : null;
+        const url = new URL(req.url);
+        const batch = part === null && url.searchParams.has('from') ? batchOf(url) : null;
+        if (part === null && url.searchParams.has('from') && !batch) return text('bad batch', 400);
+
+        if (req.method === 'GET' && batch) {
+            const rows = this.sql.exec<{ part: number; data: ArrayBuffer }>(
+                'SELECT part, data FROM blobs WHERE id = ? AND part >= ? AND part < ? ORDER BY part',
+                id, batch.from, batch.from + batch.n).toArray();
+            if (rows.length !== batch.n) return text('no such part', 404);
+            return new Response(frame(rows.map((r) => r.data)), {
+                headers: {
+                    'content-type': 'application/octet-stream',
+                    'cache-control': 'private, max-age=21600, immutable',
+                    ...CORS,
+                },
+            });
+        }
 
         if (req.method === 'GET') {
             if (part === null) {
@@ -306,15 +593,28 @@ export class TableRoom implements DurableObject {
             return text('ok', 200);
         }
 
-        if (req.method === 'PUT' && part !== null) {
-            if (part >= MAX_PARTS) return text('too many parts', 413);
-            if (!data || data.byteLength === 0) return text('empty part', 400);
-            if (data.byteLength > MAX_PART_BYTES) return text('part too large', 413);
+        if (req.method === 'PUT' && (part !== null || batch)) {
+            let parts: ArrayBuffer[];
+            const first = part ?? batch!.from;
+            if (part !== null) {
+                if (!data || data.byteLength === 0) return text('empty part', 400);
+                if (data.byteLength > MAX_PART_BYTES) return text('part too large', 413);
+                parts = [data];
+            } else {
+                const split = data ? unframe(data) : null;
+                if (!split) return text('bad batch', 400);
+                parts = split;
+            }
+            if (first + parts.length > MAX_PARTS) return text('too many parts', 413);
 
-            this.sql.exec('DELETE FROM blobs WHERE id = ? AND part = ?', id, part);
-            if (!this.makeRoom(data.byteLength, id)) return text('room storage full', 507);
-            this.sql.exec('INSERT INTO blobs (id, part, data, size, at) VALUES (?, ?, ?, ?, ?)',
-                id, part, data, data.byteLength, Date.now());
+            const total = parts.reduce((n, p) => n + p.byteLength, 0);
+            this.sql.exec('DELETE FROM blobs WHERE id = ? AND part >= ? AND part < ?', id, first, first + parts.length);
+            if (!this.makeRoom(total, id)) return text('room storage full', 507);
+            const now = Date.now();
+            parts.forEach((p, i) => {
+                this.sql.exec('INSERT INTO blobs (id, part, data, size, at) VALUES (?, ?, ?, ?, ?)',
+                    id, first + i, p, p.byteLength, now);
+            });
             await this.touch();
             return text('ok', 200);
         }
@@ -337,7 +637,7 @@ export class TableRoom implements DurableObject {
 
     /** A file write is activity too: it keeps the room from its idle wipe. */
     private async touch(): Promise<void> {
-        await this.state.storage.setAlarm(Date.now() + IDLE_MS);
+        await this.rearm(Date.now());
     }
 }
 

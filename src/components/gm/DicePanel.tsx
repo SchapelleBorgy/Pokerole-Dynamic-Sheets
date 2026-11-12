@@ -3,6 +3,7 @@ import { useGm } from '../../gm/GmContext';
 import { CRIT_DAMAGE, CRIT_MARGIN } from '../../gm/constants';
 import { HISTORY_LIMIT, VERDICTS, faceOrder, painStruck, roll } from '../../gm/dice';
 import type { RollEntry, RollMeta } from '../../gm/dice';
+import { spendRoll } from '../../gm/turns';
 
 /* The dice roller: quick d-chips, a count/sides stepper, the last roll in full
    and a compact history behind it. */
@@ -16,10 +17,19 @@ export function DicePanel({ onReorder }: {
     const { count, sides, history } = state.dice;
     const sorted = !!state.dice.sortResults;
     const latest = (history[0] as RollEntry | undefined) || null;
+    const prep = (state.dice.prep || null) as RollMeta | null;
 
-    const doRoll = (meta: RollMeta = {}) => store.update((s) => {
+    /* Rolls whatever is set up — a move panel's roll, with its count as the GM
+       may have changed it — or plain dice. */
+    const doRoll = () => store.update((s) => {
+        const meta = (s.dice.prep || {}) as RollMeta;
         const entry = roll(s.dice.count, s.dice.sides, meta, CRIT_MARGIN);
-        s.dice = { ...s.dice, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
+        /* An Accuracy, an Evasion or a Clash is the action done: the pip
+           fills, and the move or the mark is used for the Round. A set-up
+           saved before `op` existed was always an Accuracy. */
+        const use = s.dice.prep ? s.dice.prepUse : null;
+        if (use) s.combats = s.combats.map((c) => spendRoll(c, use.pid, use.op || 'acc', use.move));
+        s.dice = { ...s.dice, prep: null, prepUse: null, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
     });
 
     /* A hit rolls its damage from here rather than sending the GM back to the
@@ -30,13 +40,13 @@ export function DicePanel({ onReorder }: {
         const d = from.dmg;
         if (!d || !(d.dice + extra > 0)) return;
         const what = d.what || (from.what || '').replace(/ accuracy$/, '') + ' damage';
+        /* Set up, like every roll from a move: Roll throws it. */
         store.update((s) => {
-            const entry = roll(d.dice + extra, 6, {
-                who: from.who, what: what + (extra ? ' (critical)' : ''), pain: from.pain,
-                tok: from.tok, gid: from.gid,
-            }, CRIT_MARGIN);
             s.dice = { ...s.dice, count: d.dice + extra, sides: 6,
-                history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
+                prep: {
+                    who: from.who, what: what + (extra ? ' (critical)' : ''), pain: from.pain,
+                    tok: from.tok, gid: from.gid,
+                }, prepUse: null };
         });
     };
 
@@ -74,7 +84,7 @@ export function DicePanel({ onReorder }: {
                 </>
             }
         >
-            <div className="panel-body">
+            <div className="panel-body" data-keeps-tip="">
                 <div className="dice-chips" id="dice-chips">
                     {QUICK_DICE.map((s) => (
                         <button
@@ -130,9 +140,29 @@ export function DicePanel({ onReorder }: {
                         />
                     </div>
                 </div>
-                <button id="roll-btn" onClick={() => doRoll()}>Roll {count}d{sides}</button>
+                {prep && (
+                    <div className="dice-prep" data-dice-prep="">
+                        <i className="fa-solid fa-hand-pointer"></i>
+                        <span className="dice-prep-text">
+                            {[prep.who, prep.what].filter(Boolean).join(' · ') || 'Roll set up'}
+                            {prep.need != null && <> · needs {prep.need}</>}
+                            {prep.need != null && prep.crit != null && <> · crit at +{prep.crit}</>}
+                            {!!prep.pain && <> · pain −{prep.pain}</>}
+                        </span>
+                        <button
+                            className="icon-btn"
+                            aria-label="Cancel the roll that is set up"
+                            onClick={() => store.update((s) => { s.dice = { ...s.dice, prep: null, prepUse: null }; })}
+                        >
+                            <i className="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                )}
+                <button id="roll-btn" className={prep ? 'primed' : ''} onClick={() => doRoll()}>
+                    Roll {count}d{sides}{prep && prep.bonus != null ? (prep.bonus < 0 ? ' − ' : ' + ') + Math.abs(prep.bonus) : ''}
+                </button>
                 <div id="roll-output">
-                    {latest && <RollOutput entry={latest} sorted={sorted} onRollDamage={rollDamage} />}
+                    {latest && <RollOutput key={latest.t} entry={latest} sorted={sorted} onRollDamage={rollDamage} />}
                 </div>
                 <div id="roll-history">
                     {(history.slice(1) as RollEntry[]).map((e, i) => (
@@ -195,9 +225,11 @@ export function RollOutput({ entry, sorted, onRollDamage }: {
        miss. */
     const showFollowUp = entry.dmg && (entry.verdict === 'hit' || entry.verdict === 'crit' || !entry.verdict);
     const extra = entry.verdict === 'crit' ? CRIT_DAMAGE : 0;
+    /* Keyed by its time, so a new roll mounts afresh and lights up once. */
+    const fresh = Date.now() - entry.t < 3000;
 
     return (
-        <div className="roll-result">
+        <div className={'roll-result' + (fresh ? ' fresh' : '')}>
             <div className="roll-label"><span>{entry.label}</span><span>{time}</span></div>
             {entry.what && (
                 <div className="roll-ctx">

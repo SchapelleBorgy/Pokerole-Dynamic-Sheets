@@ -60,7 +60,8 @@ html[data-device="phone"] .map-rail {
     padding: 0.35rem 0.5rem;
 }
 
-html[data-device="phone"] .map-rail-sep { width: 1px; height: 24px; margin: 0 0.15rem; }
+html[data-device="phone"] .map-rail-group { flex-direction: row; }
+html[data-device="phone"] .map-rail-group:not(:empty) ~ .map-rail-group:not(:empty)::before { width: 1px; height: 24px; margin: 0 0.1rem; }
 
 html[data-device="phone"] .map-tool { flex: 0 0 auto; }
 

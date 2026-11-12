@@ -128,13 +128,23 @@
 .turn-pips { display: flex; gap: 2px; }
 
 .turn-pip {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     border: 1px solid var(--pc-border);
 }
 
 .turn-pip.used { background: var(--pc-color); border-color: var(--pc-color); }
+
+/* Everyone's actions are on show: the GM's side in the neutral grey. */
+.turn-entry.foe .turn-pip { border-color: var(--ghost-color); }
+.turn-entry.foe .turn-pip.used { background: var(--ghost-color); border-color: var(--ghost-color); }
+
+/* A player's character in the colour that player chose (colors.ts). */
+.turn-entry.by-color .turn-face { border-color: var(--who); }
+.turn-entry.by-color .turn-pip { border-color: var(--who-border); }
+.turn-entry.by-color .turn-pip.used { background: var(--who); border-color: var(--who); }
+.turn-entry.mine.by-color .turn-name { color: var(--who); }
 
 .turn-empty, .turn-wait { margin: 0; font-size: 0.74rem; }
 
@@ -157,6 +167,8 @@
 }
 
 /* ---------------- Into the fight, from the character panel ---------------- */
+
+.combat-entry { display: flex; flex-direction: column; gap: 0.3rem; }
 
 .combat-entry > button { width: 100%; justify-content: center; }
 
@@ -181,3 +193,9 @@
 .combat-entry-go { display: flex; justify-content: flex-end; gap: 0.4rem; }
 
 .combat-entry-note { margin: 0; font-size: 0.76rem; }
+
+.combat-entry [data-no-fight] { text-align: center; }
+
+/* The GM's reminder that no fight is shared: one quiet line. */
+.turn-strip-idle { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
+.turn-strip-idle .fa-tower-broadcast { color: var(--accent); }

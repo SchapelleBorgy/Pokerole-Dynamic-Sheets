@@ -1,17 +1,18 @@
 import { useGm } from '../../gm/GmContext';
 import { useAppData } from '../../data/AppDataContext';
-import { CRIT_MARGIN } from '../../gm/constants';
-import { HISTORY_LIMIT, roll } from '../../gm/dice';
 import type { RollMeta } from '../../gm/dice';
 import { painFromHp, painPenalty } from '../../gm/moves';
 import { resolvePoolValue } from '../../gm/pools';
 import {
-    entityPool, entityRef, participantForToken, storedToken, trainerIdAt, wildLiveSheet,
+    bareValue, entityPool, entityRef, participantForToken, storedToken, trainerIdAt, wildDexId, wildLiveSheet,
 } from '../../gm/entities';
 import { workingTrainerData } from '../../gm/workingSet';
 import { parsePcToken } from '../../gm/tablePcs';
 import { monShownName } from '../../gm/entities';
-import { MonTipBody, MoveTipShell, TrainerTipBody, useTipButtonState } from './MoveTip';
+import { MonTipBody, MoveTipShell, TrainerTipBody } from './MoveTip';
+import { actionOf, markMove, pidOf, usedCount } from '../../gm/turns';
+import { clashLimit, evaLimit } from '../../lib/combatMods';
+import { MAX_ACTIONS } from '../../gm/combat';
 import type { PokedexEntry } from '../../data/types';
 import type { CardSheet } from '../../card/types';
 
@@ -25,12 +26,17 @@ interface TipTarget { dexId: string; sheet: Partial<CardSheet>; owner: string }
 
 const HIDDEN = <div className="mon-tooltip" id="mon-tooltip" style={{ display: 'none' }} />;
 
-export function MovePanel({ token, onClose }: { token: string | null; onClose: () => void }) {
+export function MovePanel({ token, onClose, onStats }: {
+    token: string | null;
+    onClose: () => void;
+    /** Swap to the stats popup of the same subject (StatPanel). */
+    onStats: (token: string) => void;
+}) {
     const { state, store } = useGm();
     const { data } = useAppData();
-    useTipButtonState(token);
 
     if (!token) return HIDDEN;
+    const toStats = { label: 'Stats', icon: 'fa-sliders', onClick: () => onStats(token) };
 
     const dexById = (id: string): PokedexEntry | null =>
         data.pokemon.find((p) => p._id === id) || null;
@@ -47,7 +53,7 @@ export function MovePanel({ token, onClose }: { token: string | null; onClose: (
         if (parts[0] === 'w') {
             const w = state.wilds.find((x) => x.gid === parts[1]);
             if (!w) return null;
-            return { dexId: w.dexId, sheet: wildLiveSheet(w), owner: 'Wild' };
+            return { dexId: wildDexId(w), sheet: wildLiveSheet(w), owner: 'Wild' };
         }
         const pc = parsePcToken(token);
         if (pc && pc.key !== 't') {
@@ -63,37 +69,66 @@ export function MovePanel({ token, onClose }: { token: string | null; onClose: (
         return null;
     })();
 
-    const doRoll = (dice: number, meta: RollMeta) => {
-        /* An empty pool is not a roll of one die — the same rule the ailment
-           rolls follow. */
+    /* Sets the roll up in the Dice panel rather than throwing it: the GM may
+       still add or take away dice for a modifier, and then presses Roll. An
+       empty pool is not a roll of one die — the same rule the ailment rolls
+       follow. */
+    /* What this round has already cost the subject. Only combatants have
+       actions, so a subject sitting in the roster rolls its plain Accuracy with
+       no target number. The filled pips are the actions already DONE, so the
+       one being played is the next: none filled is action one, needing one
+       success (src/gm/turns.ts). */
+    const part = participantForToken(state, dexById, token);
+    const act = part ? actionOf((part.acted as number) || 0) : null;
+    const pid = part ? pidOf(part) : null;
+    /* An Evasion and a Clash are once a Round, and nothing is rollable once
+       the five actions are spent — the table's character panel draws them
+       the same way. */
+    const done = part ? ((part.acted as number) || 0) >= MAX_ACTIONS : false;
+    const subject = entityRef(state, dexById, token);
+    const mods = subject?.mods;
+    const spent = part ? {
+        eva: usedCount(part.usedEva) >= evaLimit(mods) || done,
+        clash: usedCount(part.usedClash) >= clashLimit(mods) || done,
+    } : undefined;
+
+    const doRoll = (dice: number, meta: RollMeta, quick?: string, move?: string) => {
         if (!(dice > 0)) return;
         store.update((s) => {
-            const entry = roll(dice, 6, { ...meta, tok: storedToken(s, token) || undefined }, CRIT_MARGIN);
-            s.dice = { ...s.dice, count: dice, sides: 6, history: [entry, ...s.dice.history].slice(0, HISTORY_LIMIT) };
+            s.dice = {
+                /* Whose roll it is rides along to Roll, so the table can show
+                   it to the players in that fight. */
+                ...s.dice, count: dice, sides: 6, prep: { ...meta, tok: storedToken(s, token) || undefined },
+                /* Rolling it is the action: Roll fills the pip. */
+                prepUse: pid && (quick === 'acc' || quick === 'eva' || quick === 'clash')
+                    ? { pid, op: quick, ...(quick === 'acc' && move ? { move } : {}) } : null,
+            };
         });
     };
 
-    /* What this round has already cost the subject. Only combatants have
-       actions, so a subject sitting in the roster rolls its plain Accuracy with
-       no target number. The pip is filled for the action being taken, so the
-       count of filled pips IS the number of this action. Before the first pip
-       is clicked the subject is on action one. */
-    const part = participantForToken(state, dexById, token);
-    const act = part ? Math.max(1, (part.acted as number) || 0) : null;
+    const used = part && Array.isArray(part.usedMoves) ? part.usedMoves : [];
+    const toggleUsed = pid ? (move: string) => {
+        store.update((s) => {
+            s.combats = s.combats.map((c) => markMove(c, pid, move, !used.includes(move)));
+        });
+    } : undefined;
 
     /* A trainer resolves through EntityRef, which already reads a trainer's flat
        .json and a Pokemon's species-backed sheet the same way. */
-    const asTrainer = entityRef(state, dexById, token);
+    const asTrainer = subject;
     if (asTrainer && asTrainer.kind === 'trainer') {
         const hp = entityPool(asTrainer, 'hp');
         return (
-            <MoveTipShell token={token} onClose={onClose}>
+            <MoveTipShell token={token} onClose={onClose} switchTo={toStats}>
                 <TrainerTipBody
+                    mods={asTrainer.mods}
+                    bare={bareValue(asTrainer)}
                     name={asTrainer.name}
                     rank={asTrainer.rank}
                     value={asTrainer.value}
                     pain={hp ? painFromHp(hp.cur, hp.max) : 0}
                     act={act}
+                    spent={spent}
                     doRoll={doRoll}
                 />
             </MoveTipShell>
@@ -113,8 +148,10 @@ export function MovePanel({ token, onClose }: { token: string | null; onClose: (
 
     const sheet = target.sheet;
     return (
-        <MoveTipShell token={token} onClose={onClose}>
+        <MoveTipShell token={token} onClose={onClose} switchTo={subject ? toStats : undefined}>
             <MonTipBody
+                mods={subject?.mods}
+                bare={subject ? bareValue(subject) : undefined}
                 token={token}
                 dex={dex}
                 sheet={sheet}
@@ -123,7 +160,10 @@ export function MovePanel({ token, onClose }: { token: string | null; onClose: (
                 value={(n) => resolvePoolValue(dex, sheet, n) || 0}
                 pain={painPenalty(dex, sheet)}
                 act={act}
+                spent={spent}
                 doRoll={doRoll}
+                used={used}
+                onToggleUsed={toggleUsed}
             />
         </MoveTipShell>
     );

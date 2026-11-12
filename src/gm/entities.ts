@@ -1,6 +1,6 @@
 import type { PokedexEntry } from '../data/types';
 import type { CardSheet } from '../card/types';
-import { wildSheetKey } from '../card/cardContext';
+import { WILD_OPEN_KEY, wildSheetKey } from '../card/cardContext';
 import type { TrainerState } from '../state/types';
 import type { GmCombatant, GmState, GmWild } from './types';
 import { STATUS_ICONS, normalizeStatus } from './ailments';
@@ -8,6 +8,10 @@ import type { GmStatus } from './ailments';
 import { monPoolCur, monPoolMax, resolvePoolValue, trainerPoolMax, trainerPoolValue } from './pools';
 import { mutateWorkingTrainer, workingTrainerData } from './workingSet';
 import { emitPcEdit, parsePcToken } from './tablePcs';
+import { readWildOpen } from '../card/wild';
+import { megaShownName } from '../card/mega';
+import { modsOfSheet, modsOfTrainer, putSheetMods, putTrainerMods } from '../lib/combatMods';
+import type { CombatMods } from '../lib/combatMods';
 
 /* One way to reach any subject on the screen.
 
@@ -40,6 +44,26 @@ export function wildKey(w: GmWild): string {
     return wildSheetKey(w.wid || w.dexId);
 }
 
+/** The species a wild is now. A wild opened on a card may have evolved or
+    Mega Evolved there: the card files it under its new species in the open
+    set (WILD_OPEN_KEY), while `w.dexId` is the one it was added as. */
+export function wildDexId(w: GmWild): string {
+    if (!w.pushed) return w.dexId;
+    const wid = w.wid || w.dexId;
+    const hit = openWilds().find((e) => e.wid === wid);
+    return hit ? hit.dexId : w.dexId;
+}
+
+/* Read on every render of every wild row: parsed once per change of the text. */
+let openRaw: string | null = null;
+let openList: ReturnType<typeof readWildOpen> = [];
+function openWilds(): ReturnType<typeof readWildOpen> {
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(WILD_OPEN_KEY); } catch { /* private mode */ }
+    if (raw !== openRaw) { openRaw = raw; openList = readWildOpen(); }
+    return openList;
+}
+
 /** A wild that has been pushed to a card tab is edited there, so the live copy
     in localStorage wins over the one loaded from file. */
 export function wildLiveSheet(w: GmWild): Partial<CardSheet> {
@@ -62,7 +86,7 @@ export function monShownName(
     const nick = ((sheet && sheet.nickname) || '').trim();
     if (nick) return nick;
     const p = dexById(dexId);
-    return p ? p.Name : dexId;
+    return p ? megaShownName(p.Name) : dexId;
 }
 
 /** Returns null when that trainer is no longer on the screen at all, so callers
@@ -96,6 +120,9 @@ export interface EntityRef {
     dex?: PokedexEntry | null;
     sheet?: Partial<CardSheet>;
     participant?: Record<string, unknown>;
+    /** Temporary combat offsets (lib/combatMods); `value` already carries
+        the attributes' share. */
+    mods: CombatMods;
     value: (n: string) => number;
 }
 
@@ -115,6 +142,7 @@ export function entityRef(
             kind: 'trainer', token: token!, name: data.name || 'Trainer', data,
             status: normalizeStatus((data as unknown as Record<string, unknown>).status),
             rank: data.rank || '',
+            mods: modsOfTrainer(data),
             value: (n) => trainerPoolValue(data, n),
         };
     }
@@ -128,6 +156,7 @@ export function entityRef(
         return {
             kind: 'mon', token: token!, name: monShownName(dexById, slot.dexId, sheet), dex, sheet,
             status: normalizeStatus(sheet.status), rank: sheet.rank || '',
+            mods: modsOfSheet(sheet),
             value: (n) => resolvePoolValue(dex, sheet, n) || 0,
         };
     }
@@ -141,6 +170,7 @@ export function entityRef(
             return {
                 kind: 'trainer', token: token!, name: copy.trainer.name || 'Trainer', data,
                 status: normalizeStatus(copy.trainer.status), rank: copy.trainer.rank || '',
+                mods: modsOfTrainer(data),
                 value: (n) => trainerPoolValue(data, n),
             };
         }
@@ -151,6 +181,7 @@ export function entityRef(
         return {
             kind: 'mon', token: token!, name: monShownName(dexById, mon.dexId, sheet), dex, sheet,
             status: normalizeStatus(sheet.status), rank: sheet.rank || '',
+            mods: modsOfSheet(sheet),
             value: (n) => resolvePoolValue(dex, sheet, n) || 0,
         };
     }
@@ -158,10 +189,12 @@ export function entityRef(
         const w = state.wilds.find((x) => x.gid === p[1]);
         if (!w) return null;
         const sheet = wildLiveSheet(w);
-        const dex = dexById(w.dexId);
+        const dexId = wildDexId(w);
+        const dex = dexById(dexId);
         return {
-            kind: 'wild', token: token!, name: monShownName(dexById, w.dexId, sheet), dex, sheet,
+            kind: 'wild', token: token!, name: monShownName(dexById, dexId, sheet), dex, sheet,
             status: normalizeStatus(sheet.status), rank: sheet.rank || '',
+            mods: modsOfSheet(sheet),
             value: (n) => resolvePoolValue(dex, sheet, n) || 0,
         };
     }
@@ -174,12 +207,28 @@ export function entityRef(
             participant: part as unknown as Record<string, unknown>,
             status: normalizeStatus((part as unknown as Record<string, unknown>).status),
             rank: '',
+            mods: {},
             /* Nothing to resolve a pool against, so a hand-typed combatant's
                cure rolls are left for the GM to size */
             value: () => 0,
         };
     }
     return null;
+}
+
+/** `ref.value` without the temporary combat offsets: the sheet's own
+    numbers, which the stats popup and the move panel print beside the
+    offset ones. */
+export function bareValue(ref: EntityRef): (n: string) => number {
+    if (ref.kind === 'trainer' && ref.data) {
+        const data = { ...ref.data, combatMods: undefined };
+        return (n) => trainerPoolValue(data, n);
+    }
+    if (ref.sheet) {
+        const sheet = { ...ref.sheet, combatMods: undefined };
+        return (n) => resolvePoolValue(ref.dex ?? null, sheet, n) || 0;
+    }
+    return ref.value;
 }
 
 /** Current and maximum HP or Will for whatever an EntityRef points at.
@@ -228,6 +277,28 @@ export function participantToken(
     const src = (p as unknown as Record<string, string>).src;
     if (src && resolveToken(state, src) && entityRef(state, dexById, src)) return src;
     return 'c:' + (p as unknown as Record<string, string>).pid;
+}
+
+/** What a combatant looks like now: the species it is, and its label to
+    match. The tracker stores both as they were when it joined the fight, and
+    a Pokémon may have evolved or Mega Evolved since — on its card, or at the
+    table for a player's. The label's species name is swapped for the new one;
+    a nickname, which names neither, stays as it is. */
+export function participantLook(
+    state: GmState,
+    dexById: (id: string) => PokedexEntry | null,
+    p: GmCombatant,
+): { dexId: string | null; label: string } {
+    const rec = p as unknown as Record<string, unknown>;
+    const stored = typeof rec.dexId === 'string' && rec.dexId ? rec.dexId : null;
+    const label = String(rec.label || '');
+    const ref = entityRef(state, dexById, participantToken(state, dexById, p));
+    const now = ref && ref.dex ? ref.dex._id : null;
+    if (!stored || !now || now === stored) return { dexId: stored, label };
+    const was = dexById(stored), is = dexById(now);
+    if (!was || !is) return { dexId: now, label };
+    const swap = [megaShownName(was.Name), was.Name].find((n) => label.includes(n));
+    return { dexId: now, label: swap ? label.replace(swap, megaShownName(is.Name)) : label };
 }
 
 /* Which combatant, if any, a token names. Both sides go through resolveToken
@@ -308,6 +379,62 @@ export function writeStatus(
         holder.status = normalizeStatus(holder.status);
         mutate(holder.status);
         emitPcEdit(pc.member, pc.key, { status: { ...holder.status } });
+        onWildChanged();
+    }
+}
+
+/** Write a subject's combat offsets back where it came from, whole: `mods`
+    is what it has now, not a step. Same routes as writeStatus; a player's
+    character is sent the full set, so a resend changes nothing. A hand-typed
+    combatant has no sheet to hold them. */
+export function writeMods(
+    state: GmState,
+    token: string,
+    mods: CombatMods,
+    onWildChanged: () => void,
+): void {
+    const p = String(resolveToken(state, token) || '').split(':');
+    if (p[0] === 't') {
+        const id = trainerIdAt(state, +p[1]);
+        if (!id) return;
+        mutateWorkingTrainer(id, (data) => putTrainerMods(data as unknown as Record<string, unknown>, mods));
+    } else if (p[0] === 'm') {
+        const id = trainerIdAt(state, +p[1]);
+        if (!id) return;
+        mutateWorkingTrainer(id, (data) => {
+            const slot = (data.team || [])[+p[2]];
+            if (!slot) return;
+            if (!slot.sheet) slot.sheet = {};
+            putSheetMods(slot.sheet as Record<string, unknown>, mods);
+        });
+    } else if (p[0] === 'w') {
+        const w = state.wilds.find((x) => x.gid === p[1]);
+        if (!w) return;
+        const sheet = wildLiveSheet(w) as Record<string, unknown>;
+        putSheetMods(sheet, mods);
+        if (w.pushed && localStorage.getItem(wildKey(w))) {
+            try { localStorage.setItem(wildKey(w), JSON.stringify(sheet)); }
+            catch { /* quota */ }
+        } else {
+            w.sheet = sheet as unknown as CardSheet;
+            onWildChanged();
+        }
+    } else if (p[0] === 'p') {
+        const pc = parsePcToken(p.join(':'));
+        const copy = pc ? state.tablePcs[pc.member] : null;
+        if (!pc || !copy) return;
+        let now: CombatMods;
+        if (pc.key === 't') {
+            if (!copy.trainer) return;
+            putTrainerMods(copy.trainer as unknown as Record<string, unknown>, mods);
+            now = modsOfTrainer(copy.trainer);
+        } else {
+            const mon = copy.mons[pc.key];
+            if (!mon) return;
+            putSheetMods(mon.sheet as unknown as Record<string, unknown>, mods);
+            now = modsOfSheet(mon.sheet);
+        }
+        emitPcEdit(pc.member, pc.key, { mods: now });
         onWildChanged();
     }
 }
@@ -411,7 +538,7 @@ export function adjustPool(
         const w = state.wilds.find((x) => x.gid === parts[1]);
         if (!w) return;
         const sheet = wildLiveSheet(w) as unknown as Record<string, number>;
-        const dex = dexById(w.dexId);
+        const dex = dexById(wildDexId(w));
         const max = monPoolMax(dex, sheet as Partial<CardSheet>, key);
         sheet[key] = clamp(monPoolCur(dex, sheet as Partial<CardSheet>, key) + delta, max);
         /* Write back wherever that sheet came from: the card's own key once the

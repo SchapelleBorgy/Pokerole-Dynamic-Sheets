@@ -32,6 +32,13 @@ const RETIRE_MS = 90_000;
 const SAVED_PREFIX = 'pokeroleTable:map:';
 /** How many maps the GM can hold on one table. */
 export const MAX_TABLE_MAPS = 12;
+/** The least time between two looks at the relay prompted by players. */
+const CHECK_GAP_MS = 15_000;
+/** What the table's maps may hold on the relay together. With the music's
+    own share (music.ts MUSIC_BUDGET) it stays under the room's 256 MB, so the
+    relay never has to drop a file to make room — a drop is what used to send
+    the GM's page re-uploading, and the players re-downloading, in a loop. */
+const MAP_BUDGET = 96 * 1024 * 1024;
 
 /** One map the GM holds, as the GM's own panel lists it. */
 export interface MapEntry {
@@ -167,6 +174,9 @@ export class MapShare {
     private fetching = '';
     private abort: AbortController | null = null;
     private retry: number | null = null;
+    /** GM: the paced look at the relay (checkSoon). */
+    private checkTimer: number | null = null;
+    private checkAt = 0;
     /** GM: pictures waiting while another uploads, by entry key — a newer
         picture of the same map overtakes one still waiting. */
     private queued = new Map<string, { run: () => Promise<void>; skip: () => void }>();
@@ -214,14 +224,19 @@ export class MapShare {
         this.openLink();
     }
 
-    end(): void {
+    /** `quiet`: the table moved to another tab rather than closing, so the
+        Map Maker is not told goodbye — that would end its live map. */
+    end(quiet = false): void {
         this.generation++;
         this.abort?.abort();
         this.abort = null;
         if (this.retry !== null) clearTimeout(this.retry);
         this.retry = null;
+        if (this.checkTimer !== null) clearTimeout(this.checkTimer);
+        this.checkTimer = null;
+        this.checkAt = 0;
         if (this.channel) {
-            this.post({ t: 'bye' });
+            if (!quiet) this.post({ t: 'bye' });
             this.channel.close();
             this.channel = null;
         }
@@ -332,14 +347,16 @@ export class MapShare {
         this.announce();
     }
 
-    /** Takes one map off the table and out of the relay. */
-    remove(key: string): void {
+    /** Takes one map off the table and out of the relay. `keepHides`: a
+        World Builder scene giving way to the next keeps what the GM hid on
+        it, for when it is shown again. */
+    remove(key: string, keepHides = false): void {
         if (!this.host) return;
         if (key === this.uploadingKey) this.droppedWhileUploading = true;
         const old = this.entries.find((e) => e.key === key);
         if (!old) return;
         this.entries = this.entries.filter((e) => e.key !== key);
-        if (old.mapId) delete this.hides[old.mapId];
+        if (old.mapId && !keepHides) delete this.hides[old.mapId];
         this.queued.get(key)?.skip();
         this.queued.delete(key);
         const wasActive = this.active === key;
@@ -354,18 +371,36 @@ export class MapShare {
     /** Keeps a live map's landmark, token or label off the players' picture,
         or puts it back — one object by `id`, or with no id every object of
         `kind`, ones placed later included. The Map Maker redraws the picture
-        players already have without it, and the table shows that. */
+        players already have without it, and the table shows that.
+
+        Under a hidden kind, one object put back is an exception (`shown`),
+        so the GM can hide every landmark and still show the town. Hiding or
+        showing the whole kind again clears that kind's choices one by one. */
     setHidden(key: string, kind: HideKind, id: string | null, hidden: boolean): void {
         if (!this.host) return;
         const e = this.entries.find((x) => x.key === key);
         if (!e || !e.mapId) return;
         const was = this.hides[e.mapId] ?? { kinds: [], ids: [] };
-        const next: PlayerHide = id === null
-            ? { kinds: hidden ? [...new Set([...was.kinds, kind])] : was.kinds.filter((k) => k !== kind), ids: was.ids }
-            : { kinds: was.kinds, ids: hidden ? [...new Set([...was.ids, id])] : was.ids.filter((x) => x !== id) };
+        let kinds = was.kinds;
+        let ids = was.ids;
+        let shown = was.shown ?? [];
+        if (id === null) {
+            const ofKind = new Set((e.objects ?? []).filter((o) => o.kind === kind).map((o) => o.id));
+            kinds = hidden ? [...new Set([...kinds, kind])] : kinds.filter((k) => k !== kind);
+            ids = ids.filter((x) => !ofKind.has(x));
+            shown = shown.filter((x) => !ofKind.has(x));
+        } else if (kinds.includes(kind)) {
+            ids = ids.filter((x) => x !== id);
+            shown = hidden ? shown.filter((x) => x !== id) : [...new Set([...shown, id])];
+        } else {
+            ids = hidden ? [...new Set([...ids, id])] : ids.filter((x) => x !== id);
+        }
         /* Ids of objects no longer on the map are dropped as they go. */
         const onMap = new Set((e.objects ?? []).map((o) => o.id));
-        next.ids = next.ids.filter((x) => onMap.has(x) || x === id);
+        const keep = (x: string) => onMap.has(x) || x === id;
+        const next: PlayerHide = { kinds, ids: ids.filter(keep) };
+        shown = shown.filter(keep);
+        if (shown.length) next.shown = shown;
         if (next.kinds.length || next.ids.length) this.hides[e.mapId] = next;
         else delete this.hides[e.mapId];
         this.save();
@@ -411,6 +446,10 @@ export class MapShare {
             if (!this.entries.some((e) => e.key === key) && this.entries.length >= MAX_TABLE_MAPS) {
                 throw new Error('The table holds ' + MAX_TABLE_MAPS + ' maps at most: remove one first.');
             }
+            const held = this.entries.filter((e) => e.key !== key).reduce((n, e) => n + e.file.size, 0);
+            if (held + blob.size > MAP_BUDGET) {
+                throw new Error('The table’s maps would pass ' + MAP_BUDGET / 1024 / 1024 + ' MB: remove one first.');
+            }
             this.uploading = true;
             this.uploadingKey = key;
             this.droppedWhileUploading = false;
@@ -453,13 +492,30 @@ export class MapShare {
         void next.run().catch(() => { /* reported by its own caller */ }).finally(() => this.drain());
     }
 
+    /** A player could not fetch one of the maps: look at the relay soon. The
+        reports are the players' to send, and every look is a request to the
+        relay for each map held, so looks are paced — at once after a quiet
+        spell, then at most one every CHECK_GAP_MS, whatever arrives — or a
+        player could spend the relay's daily allowance from the GM's page. */
+    checkSoon(): void {
+        if (!this.host || this.checkTimer !== null) return;
+        const wait = Math.max(0, this.checkAt + CHECK_GAP_MS - Date.now());
+        this.checkTimer = window.setTimeout(() => {
+            this.checkTimer = null;
+            this.checkAt = Date.now();
+            void this.verify();
+        }, wait);
+    }
+
     /** The relay may have dropped a picture — an idle wipe, or the room's
         space filling up. Puts each missing one back under a new id. */
     async verify(): Promise<void> {
         const files = this.files();
         if (!this.host || !files || this.uploading) return;
+        const found = await files.inventory();
+        if (!found) return;
         for (const s of [...this.entries]) {
-            if (await files.present(s.file)) continue;
+            if (found.has(s.file)) continue;
             if (!this.entries.some((e) => e.key === s.key && e.file.id === s.file.id)) continue;
             try {
                 await this.stage(s.key, s.blob, s.w, s.h, s.title, s.live, s.mapId, s.objects);
@@ -513,6 +569,10 @@ export class MapShare {
             }
             return;
         }
+        if (m.t === 'show') {
+            this.activate('mm:' + m.mapId);
+            return;
+        }
         if (m.t !== 'image') return;
 
         let error = '';
@@ -522,6 +582,10 @@ export class MapShare {
             const w = Math.round(m.w), h = Math.round(m.h);
             if (!(w > 0 && h > 0 && w <= LIMITS.MAX_MAP_SIDE && h <= LIMITS.MAX_MAP_SIDE)) throw new Error('That picture is too big.');
             await this.stage('mm:' + m.mapId, m.image, w, h, title, m.live, m.mapId, m.objects);
+            /* A World Builder scene: on show at once, and the one it takes
+               over from leaves the table — players moved on from it. */
+            if (m.show) this.activate('mm:' + m.mapId);
+            if (m.replaces && this.entries.some((e) => e.key === 'mm:' + m.replaces)) this.remove('mm:' + m.replaces, true);
         } catch (e) {
             error = e instanceof Error ? e.message : 'The table could not take the map.';
             this.set({ error });

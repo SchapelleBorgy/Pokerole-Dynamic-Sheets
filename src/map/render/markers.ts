@@ -14,8 +14,7 @@
    overhangs, are kept. The markers outside those are drawn one by one,
    clipped to stay out of the inner tiles, so each texel is drawn once. */
 
-import type { MapDoc } from '../types';
-import { resolvedOf } from '../raster';
+import type { Raster } from '../raster';
 import { CELL, type PatternParts } from './patterns';
 
 export interface MarkerPlan {
@@ -27,12 +26,13 @@ export interface MarkerPlan {
     edge: { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number }[];
 }
 
-/** Which markers of terrain `t` stay, for a tile drawn at `scale` world px
-    a texel. `margin` samples of the terrain are asked for round each inked
-    sample, for the smooth styles: their outlines are rounded off the
-    samples and can shave a corner by a fraction of one. */
-export function markerPlan(doc: MapDoc, t: number, parts: PatternParts, scale: number, margin: number): MarkerPlan {
-    const { w, h, res, data } = resolvedOf(doc);
+/** Which markers stay where `grid` holds `t`, for a tile drawn at `scale`
+    world px a texel. The grid is the resolved terrain for a terrain's own
+    markers, or the painted fillers (fillers.ts). `margin` samples of it are
+    asked for round each inked sample, for the smooth styles: their outlines
+    are rounded off the samples and can shave a corner by a fraction of one. */
+export function markerPlan(grid: Raster, t: number, parts: PatternParts, scale: number, margin: number): MarkerPlan {
+    const { w, h, res, data } = grid;
     const sp = CELL / res;                       // world px a sample
     /* Summed-area table of the terrain's samples. */
     const sat = new Int32Array((w + 1) * (h + 1));

@@ -7,6 +7,8 @@ import type {
     Badge, BoxEntry, BoxSpriteType, MonEntry, TeamSlot, TrainerState,
 } from './types';
 
+import { HOMEBREW_FIELD, adoptHomebrew } from '../data/homebrew';
+
 type Loose = Record<string, any>;
 
 export function normalizeTeam(team: unknown, pool = new Set<string>()): TeamSlot[] {
@@ -73,8 +75,12 @@ export function normalizeBoxes(boxes: unknown, pool = new Set<string>()): BoxEnt
     default so older / partial sheets get any missing keys back. */
 export function normalizeState(parsed: unknown): TrainerState {
     const p: Loose = (parsed && typeof parsed === 'object') ? parsed as Loose : {};
+    /* A file's homebrew species go to the library; the trainer does not keep
+       them (trainerJson writes them out afresh). */
+    adoptHomebrew(p[HOMEBREW_FIELD]);
     const defaults = defaultState();
     const s: TrainerState = { ...defaults, ...p } as TrainerState;
+    delete (s as Loose)[HOMEBREW_FIELD];
     (['stats', 'skills', 'potionCharges', 'potionQty'] as const).forEach((k) => {
         (s as Loose)[k] = { ...(defaults as Loose)[k], ...(p[k] || {}) };
     });

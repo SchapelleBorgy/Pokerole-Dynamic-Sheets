@@ -5,7 +5,7 @@
    the map's cells, switching the grid off or changing style never moves a
    thing — the renderer multiplies by the cell size at draw time. */
 
-export type StyleId = 'handdrawn' | 'anime' | 'townmap' | 'overworld';
+export type StyleId = 'handdrawn' | 'ancient' | 'anime' | 'townmap' | 'overworld';
 
 export type PathKind = 'river' | 'road' | 'route' | 'trail' | 'border' | 'sea-route';
 
@@ -32,12 +32,24 @@ export interface MapStamp {
     /** Degrees. */
     rotation: number;
     flip: boolean;
+    /** Shown under it; may run over several lines. */
     label?: string;
+    /** 'hover': the label shows only while the pointer is over the
+        landmark (or it is selected), and a picture of the map — the PNG,
+        the players' view at the table — leaves it out. Absent: always. */
+    labelShow?: 'hover';
+    /** A single filler (`landmark` is `filler:<terrain>`): which of the
+        terrain's markers it is. See fillerStamps.ts. */
+    variant?: number;
     /** A Gym's type, drawn as a badge in its corner. */
     type?: string;
     /** Snap to the grid: true or false overrides the map's own setting,
         absent follows it. */
     snap?: boolean;
+    /** The id of the map this landmark opens: a city on a world map, an
+        interior in a city. Absent, or naming a map that is gone: nothing to
+        open yet. See world.ts. */
+    link?: string;
 }
 
 export type TokenKind = 'pokemon' | 'trainer' | 'wild';
@@ -75,7 +87,55 @@ export interface MapSketch {
     opacity: number;
     /** An arrowhead at the end. */
     arrow?: boolean;
+    /** Drawn with straight segments through its points, corners kept: a
+        shape from the Sketch tool's Shape mode (a closed one repeats its
+        first point at the end). Absent: a smooth freehand curve. */
+    straight?: boolean;
 }
+
+/** A building, tree or bench in a city (the World Builder's city builder):
+    a catalogue item standing on a FOOTPRINT of whole cells, drawn by a
+    vector painter as a sprite taller than the footprint and anchored to its
+    bottom edge, so a roof overlaps what stands behind it. See world/placed.ts. */
+export interface MapPlaced {
+    id: string;
+    /** The catalogue slug — see world/catalog.ts. Append-only, like landmarks. */
+    item: string;
+    /** The footprint's top-left corner, in cells. */
+    x: number;
+    y: number;
+    flip?: boolean;
+    /** Turned a quarter: the footprint's width and depth swap. Only items
+        that offer it (fences, benches, hedges). */
+    rot?: 1;
+    /** Which of the item's variants (world/catalog.ts); the first when absent. */
+    variant?: number;
+    /** The item's own colours, slot by slot; a missing slot keeps the
+        catalogue's. */
+    colors?: string[];
+    label?: string;
+    labelShow?: 'hover';
+    /** The map it opens, like a landmark's — an interior. */
+    link?: string;
+    snap?: boolean;
+}
+
+/** An interior's floor plan (world/room.ts): an outline of corners on whole
+    cells; outside it is nothing, the edges with the room below them stand as
+    back walls `wallH` cells tall. */
+export interface MapRoom {
+    pts: [number, number][];
+    wallH: number;
+    floor: import('./world/room').FloorKind;
+    floorColor: string;
+    wall: import('./world/room').WallKind;
+    wallColor: string;
+    /** The tops of the walls and the skirting. */
+    trim: string;
+}
+
+/** How a city or interior's buildings are coloured — see world/looks.ts. */
+export type LookId = 'colorful' | 'ancient' | 'pastel' | 'night';
 
 export type LabelRole = 'region' | 'town' | 'route' | 'small';
 
@@ -143,9 +203,39 @@ export interface MapBorders {
     terrain: Partial<Record<string, EdgeKind>>;
 }
 
+/** A picture of the GM's own under the map — see picture.ts. Where it lies
+    is in cells like everything else, so resizing the map leaves it where it
+    was; "Fit to map" stretches it over the whole map again. */
+export interface MapPicture {
+    /** The key of its bytes in IndexedDB: the picture's hash. */
+    id: string;
+    /** The file it came from, to show. */
+    name: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    /** 0.1..1 */
+    opacity: number;
+}
+
+/** What a map is in the World Builder: a region, a city in it, or the inside
+    of a building. Every kind is drawn and edited the same way for now; the
+    city and interior builders add their own layers. */
+export type DocKind = 'world' | 'city' | 'interior';
+
+/** Where a map is entered from: the map and the landmark on it that links here. */
+export interface DocParent {
+    doc: string;
+    object: string;
+}
+
 export interface MapDoc {
     id: string;
     name: string;
+    /** Absent in a map from before the World Builder: a world map. */
+    kind: DocKind;
+    parent?: DocParent;
     styleId: StyleId;
     cols: number;
     rows: number;
@@ -161,6 +251,9 @@ export interface MapDoc {
     /** The terrain code every bare sample shows — the layer under the
         painting. Rubbing terrain out uncovers it. */
     background: string;
+    /** A picture under the terrain: bare ground shows it instead of the
+        background terrain. Absent on an ordinary map. */
+    picture?: MapPicture;
     /** The painted border layer, run-length encoded like the terrain; empty
         when nothing was painted. See edges.ts. */
     edges: string;
@@ -168,20 +261,31 @@ export interface MapDoc {
     /** Fog of war over everything, run-length encoded on the terrain's
         samples; empty when there is none. See fog.ts. */
     fog: string;
+    /** Painted fillers: a terrain's markers (peaks, flowers, trees) laid
+        over the ground on top of its own, run-length encoded on the
+        terrain's samples; empty when none were painted. See fillers.ts. */
+    fillers: string;
     paths: MapPath[];
     stamps: MapStamp[];
     tokens: MapToken[];
     labels: MapLabel[];
     /** Freehand sketches, drawn over the labels and under the tokens. */
     sketches: MapSketch[];
+    /** Buildings and street furniture (cities and interiors), drawn in depth
+        order with the tokens. Empty on a world map. */
+    placed: MapPlaced[];
+    /** The colouring of the placed things; absent: Colorful. */
+    look?: LookId;
+    /** An interior's floor plan: walls, floor and wallpaper (world/room.ts). */
+    room?: MapRoom;
     /** ISO time of the last change, for the map list. */
     updatedAt: string;
 }
 
 /** Which object is selected, if any. */
 export interface Selection {
-    kind: 'stamp' | 'token' | 'label' | 'path' | 'sketch';
+    kind: 'stamp' | 'token' | 'label' | 'path' | 'sketch' | 'placed';
     id: string;
 }
 
-export type Tool = 'select' | 'paint' | 'fill' | 'erase' | 'edge' | 'fog' | 'unfog' | 'path' | 'stamp' | 'token' | 'label' | 'sketch' | 'pan';
+export type Tool = 'select' | 'paint' | 'fill' | 'shape' | 'erase' | 'edge' | 'fog' | 'unfog' | 'path' | 'stamp' | 'build' | 'room' | 'token' | 'label' | 'sketch' | 'pan';

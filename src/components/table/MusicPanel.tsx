@@ -201,6 +201,16 @@ function TrackRow({ t }: { t: GmTrack }) {
                 >
                     <i className={'fa-solid ' + (t.reveal ? 'fa-eye' : 'fa-eye-slash')}></i>
                 </button>
+                {t.kind === 'file' && (
+                    <button
+                        className="icon-btn track-preload" data-preload="" aria-pressed={t.pre}
+                        title={t.pre ? 'Players download this ahead of time. Click to send it only once it is on a deck'
+                            : 'Players get this once it is on a deck. Click to have them download it ahead of time'}
+                        onClick={() => music.setPreload(t.id, !t.pre)}
+                    >
+                        <i className={'fa-solid ' + (t.pre ? 'fa-cloud-arrow-down' : 'fa-cloud')}></i>
+                    </button>
+                )}
             </div>
             <div className="track-meta">
                 {on.map((c) => <span key={c} className={'deck-chip ' + c}>{DECK_NAMES[c]}</span>)}
@@ -215,9 +225,9 @@ function TrackRow({ t }: { t: GmTrack }) {
                     </button>
                 )}
                 <span className="bar-spacer"></span>
-                <button className="mini-btn" data-assign="bg" title="Mark as the Background track" aria-pressed={decks.bg.track === t.id}
+                <button className="mini-btn" data-assign="bg" title={decks.bg.track === t.id ? 'The Background track. Click to take it off' : 'Mark as the Background track'} aria-pressed={decks.bg.track === t.id}
                     onClick={() => music.assign('bg', t.id)}>BG</button>
-                <button className="mini-btn" data-assign="scene" title="Mark as the Scene track" aria-pressed={decks.scene.track === t.id}
+                <button className="mini-btn" data-assign="scene" title={decks.scene.track === t.id ? 'The Scene track. Click to take it off' : 'Mark as the Scene track'} aria-pressed={decks.scene.track === t.id}
                     onClick={() => music.assign('scene', t.id)}>Scene</button>
                 <button className="icon-btn" aria-label={'Rename ' + t.title} onClick={() => { setTitle(t.title); setEditing(true); }}>
                     <i className="fa-solid fa-pen"></i>
@@ -275,11 +285,12 @@ function Library() {
                 />
                 <button type="submit" className="icon-btn" aria-label="Add the YouTube link"><i className="fa-solid fa-plus"></i></button>
             </form>
-            {busy && <p className="muted"><i className="fa-solid fa-circle-notch fa-spin"></i> Reading the files…</p>}
+            {busy && <p className="muted"><i className="fa-solid fa-circle-notch fa-spin"></i> Reading the files… big ones are made smaller first.</p>}
             <p className="muted">
-                Files are sent to the table once and kept in this browser for next time. Players see a
-                track's title only once you reveal it with the eye. YouTube adverts can put a player out
-                of step for a moment.
+                Files are kept in this browser for next time, and go to the table when you mark one
+                as Background or Scene, or ahead of time if you preload it with the cloud. Players see
+                a track's title only once you reveal it with the eye. YouTube adverts can put a player
+                out of step for a moment.
             </p>
         </div>
     );
@@ -288,7 +299,9 @@ function Library() {
 function PlayerLibrary() {
     const { session } = useTable();
     const m = session.music.view;
-    const files = m.library.filter((t) => t.kind === 'file');
+    /* Only what the table needs is downloaded: a deck's track, or one the
+       GM preloads. The rest arrives once it is put on a deck. */
+    const files = m.library.filter((t) => t.kind === 'file' && (t.pre || CHANNELS.some((c) => m.decks[c].track === t.id)));
     if (!files.length) return null;
     const ready = files.filter((t) => m.tracks[t.id]?.state === 'ready').length;
     const failed = files.filter((t) => m.tracks[t.id]?.state === 'failed').length;
@@ -357,7 +370,7 @@ export function MusicPanel() {
     if (!anything) return null;
 
     return (
-        <div className="side-panel music-panel">
+        <div className="side-panel music-panel" data-tour="music">
             <FoldTitle id="music" open={open} onToggle={toggle} icon="fa-music" extra={!open && (
                 waiting ? <span className="music-state wait"><i className="fa-solid fa-hourglass-half"></i> waiting</span>
                     : playing ? <span className="music-state on"><i className="fa-solid fa-play"></i> playing</span>

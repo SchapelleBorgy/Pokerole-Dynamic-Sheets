@@ -16,6 +16,10 @@ import type { HotkeyAction } from '../../map/hotkeys';
 import type { Tool } from '../../map/types';
 import type { TableLiveLink } from '../../map/tableLive';
 import { TableLiveBanner } from './TableLinkControl';
+import { WorldStrip } from './WorldStrip';
+import { GuidedTour, useFirstTimeTour } from '../common/Tour';
+import { MAP_STEPS, MAP_TOUR_INTRO } from './tourSteps';
+import { sweepPictures } from '../../map/picture';
 
 /* The Map Maker: top bar, tool rail, the map, and the side panel. */
 
@@ -30,10 +34,16 @@ export function MapApp({ dataOk, tableLink }: { dataOk: boolean; tableLink: Tabl
     const { store, doc } = useMap();
     const toast = useToast();
     const [dialog, setDialog] = useState<'maps' | 'sprites' | 'hotkeys' | 'recipe' | null>(null);
+    useFirstTimeTour('map');
+    /* Pictures no map names any more, from earlier visits. */
+    useEffect(() => {
+        const t = window.setTimeout(() => { void sweepPictures(); }, 8000);
+        return () => window.clearTimeout(t);
+    }, []);
     const [spaceHeld, setSpaceHeld] = useState(false);
 
     useEffect(() => {
-        document.title = (doc.name ? doc.name + ' – ' : '') + 'Pokerole Map Maker';
+        document.title = (doc.name ? doc.name + ' – ' : '') + 'Pokerole World Builder';
     }, [doc.name]);
 
     useEffect(() => { store.onToast = toast; }, [store, toast]);
@@ -68,7 +78,14 @@ export function MapApp({ dataOk, tableLink }: { dataOk: boolean; tableLink: Tabl
             runAction(action);
         };
         const runAction = (action: HotkeyAction) => {
-            if (action.startsWith('tool:')) { store.setUi({ tool: action.slice(5) as Tool }); return; }
+            if (action.startsWith('tool:')) {
+                const t = action.slice(5) as Tool;
+                /* Nothing to build on a world map. */
+                if (t === 'build' && store.doc.kind === 'world') return;
+                if (t === 'room' && store.doc.kind !== 'interior') return;
+                store.setUi({ tool: t });
+                return;
+            }
             switch (action) {
                 case 'undo': store.undo(); return;
                 case 'redo': store.redo(); return;
@@ -84,12 +101,18 @@ export function MapApp({ dataOk, tableLink }: { dataOk: boolean; tableLink: Tabl
                             ...d.labels.map((o) => ({ kind: 'label' as const, id: o.id })),
                             ...d.tokens.map((o) => ({ kind: 'token' as const, id: o.id })),
                             ...d.sketches.map((o) => ({ kind: 'sketch' as const, id: o.id })),
+                            ...d.placed.map((o) => ({ kind: 'placed' as const, id: o.id })),
                         ],
                     });
                     return;
                 }
                 case 'delete': deleteSelection(store); return;
-                case 'deselect': store.setUi({ selection: [] }); return;
+                case 'deselect':
+                    /* With nothing selected, the same key backs out of a city or a
+                       building to the map it is entered from. */
+                    if (!store.ui.selection.length) { store.goUp(); return; }
+                    store.setUi({ selection: [] });
+                    return;
                 case 'brush-smaller':
                 case 'brush-larger': {
                     if (store.ui.tool === 'sketch') {
@@ -135,6 +158,7 @@ export function MapApp({ dataOk, tableLink }: { dataOk: boolean; tableLink: Tabl
                 onRecipe={() => setDialog('recipe')}
                 tableLink={tableLink}
             />
+            <WorldStrip link={tableLink} />
             <TableLiveBanner link={tableLink} />
             {!dataOk && (
                 <div id="data-missing" style={{ display: 'block' }}>
@@ -151,6 +175,7 @@ export function MapApp({ dataOk, tableLink }: { dataOk: boolean; tableLink: Tabl
             <SpriteChecklist open={dialog === 'sprites'} onClose={() => setDialog(null)} />
             <HotkeysDialog open={dialog === 'hotkeys'} onClose={() => setDialog(null)} />
             <RecipeDialog open={dialog === 'recipe'} onClose={() => setDialog(null)} />
+            <GuidedTour id="map" steps={MAP_STEPS} intro={MAP_TOUR_INTRO} />
         </>
     );
 }

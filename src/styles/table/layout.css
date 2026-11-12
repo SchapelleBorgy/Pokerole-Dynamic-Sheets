@@ -485,6 +485,26 @@ body > #live-pill { left: auto; right: 12px; }
     color: var(--text-muted);
 }
 
+/* The room lock in the Invite title (Credentials.tsx): dim while open, the
+   crit yellow while locked — the GM screen's panel pin (gm/board.css). */
+.side-title .room-lock {
+    flex: 0 0 auto;
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0;
+    font-size: 0.72rem;
+    opacity: 0.6;
+}
+.side-title .room-lock:hover:not(:disabled) { opacity: 1; }
+.side-title .room-lock.on {
+    opacity: 1;
+    color: var(--crit);
+    border-color: var(--crit);
+    box-shadow: 0 0 8px #f0b42944;
+}
+.side-title .room-lock:disabled { cursor: wait; }
+.side-title .room-lock.on:disabled { opacity: 0.75; }
+
 .cred-row {
     display: flex;
     align-items: center;
@@ -559,6 +579,21 @@ button.wide {
 }
 
 .member-list .host-mark { color: var(--crit); font-size: 0.75rem; }
+
+/* Each person's colour (colors.ts): the ring round their initial. */
+.member-list .member-avatar {
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    width: 1.45rem;
+    height: 1.45rem;
+    border-radius: 50%;
+    border: 2px solid var(--who, var(--border-color));
+    background: var(--who-faint, transparent);
+    color: var(--who, var(--text-secondary));
+    font-size: 0.68rem;
+    font-weight: 800;
+}
 
 .member-list .you {
     font-size: 0.62rem;

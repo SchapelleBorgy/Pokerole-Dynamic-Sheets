@@ -24,12 +24,16 @@
 @import './gm/generator.css';
 @import './gm/confirm-dialog.css';
 @import './gm/toast.css';
+@import './gm/stat-panel.css';
+@import './gm/settings.css';
+@import './gm/table-share.css';
 @import './table/layout.css';
 @import './table/join.css';
 @import './table/feed.css';
 @import './table/media.css';
 @import './table/character.css';
 @import './table/turns.css';
+@import './table/npc.css';
 @import './shared/tooltip.css';
 
 /* The mobile / tablet wrapper, last so it settles ties against the desktop
@@ -41,4 +45,6 @@
 
 /* The "new version is ready" bar, on every page that registers a worker. */
 @import './shared/update-prompt.css';
+/* The guided tour and its first-time question. */
+@import './shared/tour.css';
 @import './shared/scrollbars.css';

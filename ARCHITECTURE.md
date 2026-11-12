@@ -52,7 +52,7 @@ bundle, and its own browser tab:
 | `pokemon-card.html` | One Pokémon's card — a team member, a boxed one, or a wild |
 | `gm-screen.html` | The GM board: roster, combat tracker, dice, NPC names, notes |
 | `rolling-table.html` | A shared dice table. The only page that needs the network — see [The rolling table](#the-rolling-table) |
-| `map-maker.html` | A map editor for regions, towns and battle maps — see [The Map Maker](#the-map-maker) |
+| `map-maker.html` | The World Builder: regions, the cities in them and the rooms inside — see [The Map Maker](#the-map-maker) |
 
 They are linked by a shared working set in `localStorage` under
 `pokerole_working`. The license writes it; the card reads the Pokémon it was
@@ -136,6 +136,37 @@ fields that would trigger the iOS zoom.
 
 ## The Map Maker
 
+Shown to users as the **World Builder** (2026-11-08); the file, the code and
+the storage keys keep the old name. A map has a `kind` — `world`, `city` or
+`interior` ([`src/map/world.ts`](src/map/world.ts)) — and they link: a
+landmark's `link` names the map it opens, that map's `parent` names the
+landmark it is entered from. The strip under the bar (`WorldStrip`) shows the
+trail and the scene players see; double-click a linked landmark (Select or
+Pan) to step in, `Esc` with nothing selected to step out. Each map keeps its
+own undo history and view while another is open. Players see the **scene**:
+"Show this scene" makes the map on screen the live map and puts it on show,
+and the scene it replaces leaves the table (`image.show` / `image.replaces`);
+live follows the scene by id, so moving around never changes what players see.
+
+**The city builder** ([`src/map/world/`](src/map/world/)). Cities and interiors
+hold `MapDoc.placed`: catalogue items ([`catalog.ts`](src/map/world/catalog.ts),
+~170 of them: buildings, nature, street, furniture, kitchen & bath, shops;
+every building in 2-3 `variants`, and an `era` for the Modern / Medieval sets) that
+stand on a FOOTPRINT of whole cells and are drawn as a taller SPRITE anchored
+to its bottom edge ([`placed.ts`](src/map/world/placed.ts)). Placed things and
+tokens are drawn in one layer back to front by the footprint's bottom edge
+(`depthOrder`), in the editor (`PlacedLayer.tsx`, one canvas each, redrawn
+per zoom step) and in the picture (`exportPng`). All the art is vector:
+painters ([`buildings.ts`](src/map/world/buildings.ts), `props.ts`, `props2.ts`,
+`interior.ts`, `medieval.ts`, `modern.ts`) draw through a `Pen` that applies the map's LOOK
+([`looks.ts`](src/map/world/looks.ts): Colorful, Ancient, Pastel, Night),
+which also filters the ground under them. A building can open an interior
+like a landmark (`link`/`parent`). Overlaps are allowed and shown in red.
+An interior also has a floor plan, `MapDoc.room` ([`room.ts`](src/map/world/room.ts)):
+an outline of corners on the grid, edited with the Room tool's handles
+(`RoomLayer.tsx`); the edges with the room below them stand as wallpapered back
+walls, the rest is floor, and outside it is dark.
+
 `map-maker.html` edits maps of any scale on one square grid: a cell means
 whatever the map's scale label says. A map is one `MapDoc`
 ([`src/map/types.ts`](src/map/types.ts)): the terrain, plus lists of paths,
@@ -160,6 +191,28 @@ zoom or grid setting ever moves anything.
   terrain. [`render/fog.ts`](src/map/render/fog.ts) turns it into one
   blurred picture that the page lays over every object (`FogLayer` in
   `MapCanvas.tsx`) and the PNG export draws last.
+- **Painted fillers** ([`src/map/fillers.ts`](src/map/fillers.ts)): another
+  layer on the terrain's samples, `MapDoc.fillers`, holding which terrain's
+  markers (peaks, trees, flowers) go on top of the ground — a mountain range
+  with flowers on it. The Paint tool's "Fillers only" mode paints it; the
+  renderer draws only those markers, whole, over the ground's own
+  (`drawFillers` in `render/terrain.ts`), and the eraser rubs them out with the
+  terrain.
+- **Shapes** ([`src/map/shapes.ts`](src/map/shapes.ts)): a line, rectangle,
+  ellipse, triangle, diamond or hexagon dragged out corner to corner, filled
+  or outlined, painted into the terrain or the fillers in one step. Alt makes
+  it regular (a square, a circle, a line at 45° steps). The gesture repaints
+  from the map as it was at the press on every move; `ShapePicker.tsx` holds
+  its controls and the Alt tip.
+- **Landmark labels** run over as many lines as typed, and can be set to
+  show only while the pointer is over the landmark; a picture of the map (the
+  PNG, the players' view) leaves those out.
+- **Single fillers** ([`src/map/fillerStamps.ts`](src/map/fillerStamps.ts)):
+  one of a terrain's markers — a peak, a tree — as a landmark
+  (`filler:<terrain>` plus a `variant`), placed, sized and turned on its own.
+  Placed from the Paint tool's "One filler" mode.
+  Its art is the style's own marker redrawn at the size it is shown
+  (`markerArt` in `render/patterns.ts`), so it stays sharp when enlarged.
 - **Sketches** ([`src/map/sketch.ts`](src/map/sketch.ts)): freehand lines
   over the map — pen, marker, dashed, dotted, any colour, an optional
   arrowhead — kept as point lists in cells (`MapDoc.sketches`), drawn over
@@ -167,11 +220,31 @@ zoom or grid setting ever moves anything.
   draw them from the same helpers; a sketch is one stroke, so a translucent
   marker never darkens where it crosses itself. They are objects like any
   other — selectable, movable, erasable — and the sketch tool has its own
-  "rub out" mode that removes whole lines.
+  "rub out" mode that removes whole lines, and a Shape mode that draws the
+  Shapes tool's shapes as sketches (`straight`: corners kept).
 - **The background** is a layer under the painting: a bare sample (stored as
   `_`) shows the map's `background` terrain, whatever it is at the time. The
   eraser paints bare samples, so rubbing out uncovers it, and swapping the
   background from sea to clouds swaps every bare patch at once.
+- **The Ancient style**: sepia ink on aged parchment. Beyond the style data
+  it adds the paper ([`render/paper.ts`](src/map/render/paper.ts)): a
+  low-resolution sheet of stains, burnt edges and folds per map, plus a
+  repeating grain, multiplied over the ground at the end of `drawTerrain` (so
+  the editor, the PNG and the players' picture agree; a picture under the map
+  is left untinted). Its mountains are the `hatch-peaks` painters, and a
+  landmark with no art is an ink shield (`MapStyle.marker`).
+- **A picture under the map** ([`src/map/picture.ts`](src/map/picture.ts)):
+  a map drawn by hand or in another program, chosen in the background menu
+  or with "Start from a picture" in the new map form (the rows then follow
+  the picture's shape). `MapDoc.picture` holds only the picture's id (its
+  hash) and where it lies, in cells; the bytes live in IndexedDB
+  (`pokerole-map-pictures`), since a picture would not fit in localStorage.
+  `drawTerrain` draws it first and then clips the terrain to
+  `TerrainGeometry.painted` — everything painted, traced like the layers —
+  so bare ground shows the picture, and everything else (objects, fog, the
+  players' copy) works unchanged. A map file carries the picture as a data
+  URL (`files.ts`). Pictures no map names are swept on a later visit, not at
+  once, so Undo can bring one back.
 - **Borders** ([`src/map/edges.ts`](src/map/edges.ts)): each edge between two
   terrains is drawn once, in one of four looks — the style's own, a line,
   none, or a soft blend. A painted border layer (a second sample raster, laid
@@ -245,6 +318,78 @@ client can make from the id it was given, with no trust-on-first-use step. A
 player who patches their client to publish a result produces a message every
 other browser drops.
 
+**A table exists when its GM answers.** Since the relay only ever sees an
+address, a wrong id or a wrong password is not refused — it is a different,
+empty room. So a player joining from the form is let in only once a message
+signed by the lobby id's key arrives (it decrypts, so the password is right
+too); after 15 s with none they are turned away and nothing is kept. The saved
+session then records that the GM answered, so a reload rejoins even while the
+GM is away. A GM rejoining is checked against the room address kept beside
+the host key.
+
+**One tab per table in a browser.** Every tab of a browser profile is the same
+person at a table — the same keys, the same saved session — so a second tab
+used to be a second copy of them: for the GM, two hosts blind to each other
+(a page drops what its own key signed) that both rolled every request. A tab
+at a table holds a Web Lock named after it
+([`tabLock.ts`](src/table/tabLock.ts)). The newest tab takes it, a reload
+included, and the tab it came from stands down with a **Use it here** button,
+saying no goodbye to the Map Maker or the GM screen: their links carry on
+with the new tab. The GM's feed, hidden rolls included, is kept for the table
+being hosted, so the new tab and a reload start with it. A player says hello
+as soon as a GM page with a new session id speaks, so a GM page that has just
+started knows the table at once rather than dropping their rolls until their
+next heartbeat. A second browser or device is still a player: the host key
+cannot leave the browser that made the table.
+
+**The GM can lock the room** (the padlock in the Invite title). Locking keeps
+the key fingerprints of everyone on the roster (`pokerole_table_lock`, so it
+outlives a GM reload); a hello from any other key is answered with
+`{k:'locked', id}` (one refusal per 1.5 s across the table) and gets no seat.
+A kick while locked drops the key from the list. A waiting player counts as
+let in only on a roster that lists them, never on just any GM message.
+Locking decides who takes part, not who can read: the room key is the
+password's, so only a new password stops a reader.
+
+**The GM can change the password** (Change password in the Invite box, or
+Lock & change password in the lock's warning). A new password is a new room —
+address and key both come from it — so the table moves, and everyone at it
+follows by themselves. Each player's page makes an ECDH pair when it joins
+and announces the public half right after its hello (`key`, a message of its
+own so an older GM's page still lets the player in); the GM's page seals the
+new password to each member alone (`move`, crypto.ts `boxSeal`), so someone
+kicked, still in the old room with the old key, can read nothing of it. A
+player who was away at that moment comes back to the old room on their saved
+session: for an hour the GM's page keeps a door open there
+([`porter.ts`](src/table/porter.ts), `pokerole_table_moved`, kept across a
+GM reload) and hands the current password, sealed the same way, only to the
+members it carried over. The old password no longer makes anyone the GM
+(`hostRoomAddr` moves with the table). Files are in the old room's store, so
+the GM's page puts maps, tracks and pictures up again as they are needed;
+players keep theirs by hash.
+
+**A bad actor at the table is bounded, not trusted.** Anyone with the password
+reads the whole table, by design, and a kick is not a ban — a new table is
+(a kick under the room lock is one until it is unlocked).
+Within that, a patched page cannot: take someone's name (the host numbers a
+name already in use, its own above all, and rolls carry that name); push the
+roster past the 16 every page accepts, however many keys it makes; turn hellos
+into a flood of the host's replies (a roster at most once a second, a
+newcomer's welcome once every three); send sheets, turn moves and music
+reports past one shared allowance; make the GM's page ask the relay about
+"missing" files more than once every 15 s; or grow the GM screen's saved
+board — only a character in a fight has its copy there, a fight takes
+characters from at most 15 table members, and a combatant holds 16 used-move
+marks. The replay record never forgets the senders that matter (the GM on a
+player's page, the table's members on the GM's), and a player drops anyone
+else's message before checking it. From the GM, a shared picture is a raster
+type only: an SVG is a document, and opened in a tab of its own ("Open image
+in new tab") its scripts would run with this site's origin. The relay refuses
+sockets and requests from other websites' pages (a browser always names the
+page's origin), reads an upload to its end but keeps no more than a part of
+it, and moves its idle alarm at most every five minutes.
+`.verify/table-hostile.mjs` plays these bad actors against the real pages.
+
 Dice come from [`src/gm/dice.ts`](src/gm/dice.ts), unchanged and unforked, so a
 shared table and the solo GM board cannot drift on what a die does. Receivers
 recompute a roll's total and successes from its faces rather than trusting the
@@ -260,6 +405,18 @@ additional data (so the store cannot reorder, drop or swap them), and only a
 reference — id, size and SHA-256 — travels on the socket, signed by the GM. The
 store is still blind. Only the GM writes to it: the host's page claims the room
 with a random upload key on connect, and the relay keeps only that key's hash.
+An idle room's files are wiped after six hours, but the claim is kept for 90
+days more, so nobody else can take the store between two sessions.
+Parts travel eight to a request, both ways, and the GM checks what survived with
+one request for the whole room: the relay's free plan counts requests, not
+bytes. A player keeps every file it has verified, by its SHA-256, in IndexedDB
+([`fileCache.ts`](src/table/fileCache.ts), 400 MB, least recently used out
+first), so a file met again — another table, another week, a new upload of the
+same track — costs the relay nothing. The GM's page keeps the room's files
+under its 256 MB itself (music 128 MB, maps 96 MB): past the quota the relay
+drops the oldest files, and a dropped file used to be sent again, dropping
+another, with every player downloading each one again, for as long as the
+table was open.
 
 **The maps** ([`mapShare.ts`](src/table/mapShare.ts)) are pictures the GM's
 browser uploads as they arrive. The GM can hold up to twelve and shows at most
@@ -270,7 +427,9 @@ Maker in another tab of the same browser, over a same-origin `BroadcastChannel`
 ([`src/lib/tableLink.ts`](src/lib/tableLink.ts)): a one-off snapshot, or **live**,
 where every finished edit is sent on its own ([`src/map/tableLive.ts`](src/map/tableLive.ts)).
 A Map Maker map is one entry at the table however often it is sent; a live one
-keeps up while another map is on show.
+keeps up while another map is on show. Live follows its map by id, not the map
+open in the editor, and **Show this scene** moves it to the map on screen and
+puts that on show, taking the previous scene off the table.
 The fog of war is enforced by what is drawn
 ([`playerView.ts`](src/map/render/playerView.ts)): the map data never leaves
 the GM's browser, the fog is always drawn and sealed back to full strength
@@ -287,10 +446,17 @@ picture players already have again without them — never the map as it is now,
 which may hold edits not yet synced.
 
 **The music** ([`src/table/music/`](src/table/music/)) is never streamed. Every
-browser holds its own copy of each track — files downloaded ahead of time,
+browser holds its own copy of each track — a file reaches the relay and the
+players once it is on a deck, or ahead of time if the GM preloads it (the
+cloud on its row, `pre` on the wire); a WAV, FLAC or high-bitrate file is
+re-encoded to Opus in WebM by the GM's own browser when it is added
+([`compact.ts`](src/table/music/compact.ts), WebCodecs, with Cues so it seeks
+at once); when the music's share is full the GM's page takes the least
+recently used track off the relay, never one on a deck;
 YouTube links in each player's own YouTube player, kept on the page for its
 sound but never shown — and the GM publishes only
-what the two decks (Background and Scene) are doing: track, playing or not,
+what the two decks (Background and Scene) are doing — a track is on one deck
+at most, and its deck button pressed again takes it off: track, playing or not,
 and "`pos` seconds in at table-clock time `ref`". The table clock is the relay's
 ([`clock.ts`](src/table/clock.ts)): every browser pings it NTP-style over its
 socket, and the relay answers the sender alone. Each browser steers its own
@@ -330,7 +496,154 @@ reach the GM screen as cut-down copies ([`slim.ts`](src/table/slim.ts),
 the player's sheet whenever it changes, the GM's edits as values with an id
 the player acknowledges. A player may pass, delay or spend actions only for
 combatants the strip marks as theirs, checked on the host and again in the
-GM screen. The relay is unchanged.
+GM screen. One GM screen tab runs the link, under a Web Lock, and it is the
+tab in use: a tab that becomes visible or takes focus steals the lock. Each
+person picks a colour on joining ([`colors.ts`](src/table/colors.ts)) that
+their name, rolls, strip portraits and GM-screen copies wear. Rolls from a
+sheet are set up in the dice controls and thrown by Roll, on both pages, so a
+modifier can still change the dice; a player's attack, Evasion or Clash in
+the fight lights the GM's combat row ([`rollPings.ts`](src/gm/rollPings.ts)).
+The relay is unchanged.
+
+### The GM's sheets and gifts
+
+**A roster trainer can be shared** with the table, whole, team included
+([`npcShare.ts`](src/table/npcShare.ts)). The GM screen only writes who sees
+it and who may change it (`GmState.npcShares`, the menu in
+[`NpcShareMenu.tsx`](src/components/gm/NpcShareMenu.tsx)); the hosting table
+in the same browser reads that, and the trainer, straight from localStorage.
+What goes out is the trainer in pieces — the trainer itself, and each team
+Pokémon by its uid — deflated ([`zpart.ts`](src/table/zpart.ts)), only the
+pieces that changed, after 1.5 s without a further change. Nothing goes at
+rest; someone arriving gets every shared trainer whole, and a copy that
+missed a piece asks for it again (`npcwant`). Pictures go once through the
+file store, by hash. PC boxes and bookmarks are never shared.
+
+On a player's page each shared trainer is a working set of its own,
+`pokerole_table_npc_<id>`, listed in `pokerole_table_npcs`
+([`npcMode.ts`](src/state/npcMode.ts)). The License and the card opened with
+`?npc=<id>` take that key as their `WORKING_KEY`, so they edit it with no code
+of their own; read only, their stores refuse every change. A player allowed
+to edit has their changes sent back the same way (`npcset`), and the GM's
+table writes them into the GM's working set, where the GM screen, the
+License and the cards see them — which is why the License now follows
+`storage` events. A piece edited and not yet sent is never overwritten by
+one arriving. Who sees a trainer is enforced by players' pages, not by the
+encryption: the room has one key.
+
+**A wild Pokémon can be given** to a player (`GmState.gifts`, `gift`): they
+pick a trainer and it goes to the first empty team slot, else a PC box
+([`addMonToTrainer`](src/state/boxes.ts), which the License's Capture uses
+too). The answer (`giftr`) is kept in `pokerole_table_gift_results` until the
+GM screen applies it: accepted, the wild leaves the roster. The relay is
+unchanged.
+
+The table's guided tour (one for the GM, one for players) is the shared one
+described under [Guided tours](#guided-tours); its steps are in
+[`tour/steps.tsx`](src/components/table/tour/steps.tsx), and the GM's map and
+fight steps carry a live line that turns green once the Map Maker or the GM
+screen reaches the table from another tab.
+
+## The Contact Center
+
+`contact-center.html`: bug reports, suggestions and requests, in three tabs.
+The posts are the repository's **GitHub issues** — GitHub keeps them, everyone
+reads them, anyone with an account writes one, and only the owner edits, labels,
+closes or deletes someone else's. There is no database of ours.
+
+- `src/contact/` — `config.ts` (repo, worker URL, the `?ghapi=&ghauth=&cworker=`
+  test seam, inert off localhost), `github.ts` (the REST calls; the list is kept
+  a minute in `pokerole_contact_cache`, since an anonymous reader has 60 calls an
+  hour), `auth.ts` (sign-in), `sanitize.ts` (GitHub's `body_html`, filtered again
+  by allowlist before it reaches the page), `categories.ts` (the three forms).
+- `src/components/contact/` — the list, one post with its replies, the form.
+- **Sign-in** is a GitHub App's web flow with PKCE. The code is traded for a
+  token by `contact-worker/` (a Cloudflare Worker apart from the relay), the one
+  place the App's client secret lives; it asks with `repository_id`, so a token
+  reaches this repository only, and only issues. The token (8 h, renewed with a
+  6-month refresh token) is in `pokerole_contact_auth`. Drafts survive the trip
+  to GitHub and back (`pokerole_contact_draft_*`). Without the worker's secrets,
+  or from `file://`, the page reads and links to GitHub's own forms instead.
+- **Labels.** GitHub drops labels sent by a user without push access, so a post
+  from the page carries `<!-- pds-contact:<kind> -->` in its body and is sorted
+  by it; `.github/workflows/contact-labels.yml` on `main` turns it into the label.
+  Posts from github.com get theirs from `.github/ISSUE_TEMPLATE/` (also `main`),
+  whose questions and headings are the page's own, so both read alike.
+- The owner, signed in, gets Mark resolved / Close, not planned / Reopen.
+
+`contact-worker/README.md` has the App's settings and the harnesses.
+
+## Homebrew Pokémon
+
+A species made on the Pokémon card (the flask among the tools, or Create a
+Homebrew Pokémon on the empty card): name, dex number, category, art, typing,
+gender, attributes and limits, Base HP, the four ability slots, the learnset by
+rank, evolutions, and moves and abilities of its own.
+
+- `src/data/homebrew.ts` — the library (`pokerole_homebrew`), the cleaning of
+  anything read from a file, and `attachHomebrew`, which the loader calls: each
+  homebrew goes to the FRONT of `data.pokemon`, its moves and abilities into
+  theirs. Every page then finds it by id or name like any other species, so
+  nothing downstream knows the difference.
+- **Ids start `hb-`**, and so does `Image` (`hb-….png`). `lib/sprites.ts` and
+  the card's sprite panel ask `homebrewLook(image)`: each set (Home, Book, Box,
+  Token) draws its own uploaded art (`Arts`, WebP data URLs, 256 px at most),
+  else that set of the official species it borrows (`SpriteOf`), else another
+  set's art, else a Poké Ball.
+- `Tier` is the kind of Pokémon (Legendary, Mythical, Ultra Beast, Paradox, or
+  '' for Normal), one at a time; `Legendary` is set for every tier but Normal,
+  as the dex's own flag is.
+- The editor's species, move and ability fields are `Combo`
+  (`HomebrewFields.tsx`), the card's suggestion panel in a portal: a
+  `<datalist>` opens as the browser's own grey box. Types are `TypePicker`.
+- **Files carry their species.** `trainerJson` writes `homebrewSpecies` (every
+  homebrew on the team and in the boxes, plus what they evolve from or into);
+  `wildPayload` does the same; `normalizeState`, the wild import, the License's
+  capture and the GM roster's import adopt them. The newer copy (`Updated`)
+  wins. A homebrew the browser has never seen opens a notice on the card, never
+  another species: a trainer's card would save that species over its slot.
+- A name the official dex uses is refused by the editor and marked
+  "(Homebrew)" when it arrives in a file, since evolutions go by name.
+- `Number` is 0, so the GM's generator never rolls one.
+- Not carried: the rolling table's messages (a player's homebrew shows as an
+  unknown species to a GM in another browser) and the GM session file.
+
+`src/components/card/HomebrewHub.tsx` is the library window,
+`HomebrewEditor.tsx` the editor. Harnesses: `.verify/homebrew-test.mjs` (the
+data layer in Node, bundle from `homebrew-entry.ts`), `homebrew-e2e.mjs`
+(three browsers), `homebrew-license.mjs`, `homebrew-view.mjs [412 915]`.
+
+## Guided tours
+
+Every page has a spotlight tour of a minute or so — one part lit, the rest
+dimmed and blurred, a card explaining it — weighted towards what is easy to
+miss: the License's equipment and coin purse, the card's pinned moves and
+social view, the GM board's rearranging and Shift-steps, the Map Maker's mouse
+shortcuts and fog. It is offered the first time a page is opened and replayed
+from the **?** beside each page's Home button.
+
+- [`src/lib/tour.ts`](src/lib/tour.ts): the tour ids, the steps' type, the
+  store, and whether to ask — this browser's own preference,
+  `pokerole_tours` = `{ never: page[], seen: tour[] }`. "Not now" asks again on
+  the next load; "Don't ask again" is per page. Headless Chrome is never asked
+  (every harness and the pixel comparison run there), unless the page sets
+  `__PDS_TOUR__`.
+- [`src/components/common/Tour.tsx`](src/components/common/Tour.tsx):
+  `GuidedTour` (the question and the overlay), `TourButton`, and
+  `useFirstTimeTour`, which waits until no dialog of the page's own is open.
+  The overlay is a click-proof shield, a blurred veil with the hole cut by an
+  even-odd `clip-path`, and the card; a frame loop follows the target, since
+  pages are live. While a tour runs no key reaches the page.
+- Each page's steps sit beside its app: `license/tourSteps.tsx`,
+  `card/tourSteps.tsx`, `gm/tourSteps.tsx`, `map/tourSteps.tsx`,
+  `table/tour/steps.tsx`. A step names its target by selectors — the first
+  VISIBLE match wins, or every match with `union` — and may hold a folded
+  panel open (`unfold`), pick a view (`view`: the table's Map / Table, the GM
+  board's tab on a phone), or be left out when its target is absent
+  (`optional`). The step's id is on `<html>` as `data-tour-step`, so CSS can
+  show what only a hover would (the License's Equipment button).
+- [`src/styles/shared/tour.css`](src/styles/shared/tour.css), imported by every
+  page, themed from the page's own tokens like the tooltip and the update bar.
 
 ## Phones and tablets
 

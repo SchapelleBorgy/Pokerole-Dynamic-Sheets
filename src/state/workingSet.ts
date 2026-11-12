@@ -2,6 +2,7 @@ import { TRAINER_MARKER, TRAINER_ORDER_KEY, WORKING_KEY } from './constants';
 import { defaultState } from './defaults';
 import { normalizeState } from './normalize';
 import type { TrainerEntry, TrainerState } from './types';
+import { HOMEBREW_FIELD, homebrewFor } from '../data/homebrew';
 
 /* The working set: every loaded / created trainer.
 
@@ -48,8 +49,16 @@ export function trainerFileName(t: Pick<WorkingTrainer, 'fileName' | 'data'>): s
         || ('trainer-' + ((t.data.name || 'trainer').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase() || 'trainer') + '.json');
 }
 
+/** The file carries the definition of every homebrew species on the team or
+    in the boxes, so it opens anywhere (data/homebrew). */
 export function trainerJson(t: Pick<WorkingTrainer, 'data'>): string {
-    return JSON.stringify({ ...t.data, [TRAINER_MARKER]: true }, null, 2);
+    const mons = [...(t.data.team || []), ...(t.data.boxes || []).flatMap((b) => b.mons || [])];
+    const homebrew = homebrewFor(mons.map((m) => m && m.dexId).filter(Boolean));
+    return JSON.stringify({
+        ...t.data,
+        ...(homebrew.length ? { [HOMEBREW_FIELD]: homebrew } : null),
+        [TRAINER_MARKER]: true,
+    }, null, 2);
 }
 
 /* ---- Unsaved-changes (dirty) tracking ----

@@ -9,8 +9,11 @@ import { MAX_CELLS, MIN_CELLS, clampCells, resizeDoc } from '../../map/doc';
 import { EDGE_KINDS, MAX_SOFT, MIN_SOFT } from '../../map/edges';
 import { swatchBackground } from './SidePanel';
 import type { EdgeKind } from '../../map/types';
+import { LOOKS, lookOf } from '../../map/world/looks';
 import { exportSize, renderMapPng } from '../../map/render/exportPng';
+import type { ExportResult } from '../../map/render/exportPng';
 import { exportLoader, folderReadable, pickAppFolder, readAppFolder, readsFromDisk } from '../../map/render/exportImages';
+import { PICTURE_ACCEPT, fitPicture, importPicture, loadPicture, onPictureArrived, pictureMissing, rowsFor } from '../../map/picture';
 
 /* The map's own settings, each on the top bar with a small window of its own
    where it needs one — they used to share a Map settings dialog. */
@@ -26,6 +29,7 @@ function usePopover() {
 
 const STYLE_HINTS: Record<string, string> = {
     handdrawn: 'Ink on parchment, like an old atlas',
+    ancient: 'Sepia ink on aged parchment, like a realm\'s old atlas',
     anime: 'Flat, bright colours with clean outlines',
     townmap: 'The games\' region map: blocks and routes',
     overworld: 'Top-down pixel tiles, as walked in the games',
@@ -66,6 +70,55 @@ export function StyleControl() {
     );
 }
 
+/** A city or interior's look (world/looks.ts): how its buildings are
+    coloured, and the ground under them. Ancient also switches the map's own
+    style to Ancient, so the terrain is drawn on the same old paper. */
+export function LookControl() {
+    const { store, doc } = useMap();
+    const pop = usePopover();
+    if (doc.kind === 'world') return null;
+    const current = lookOf(doc.look);
+    return (
+        <>
+            <button
+                ref={pop.anchor} className="icon-btn map-style-btn" aria-expanded={pop.open} data-look-btn=""
+                title="Look: how the buildings are coloured" onClick={() => pop.setOpen((o) => !o)}
+            >
+                <i className={'fa-solid ' + current.icon}></i> <span className="map-style-name">{current.name}</span> <i className="fa-solid fa-caret-down"></i>
+            </button>
+            <Popover anchor={pop.anchor} open={pop.open} onClose={pop.close}>
+                <div className="map-popover-title">Look</div>
+                <div className="map-style-list">
+                    {LOOKS.map((l) => (
+                        <button
+                            key={l.id}
+                            className="map-style-choice"
+                            aria-pressed={current.id === l.id}
+                            data-look={l.id}
+                            onClick={() => {
+                                if (current.id !== l.id) {
+                                    store.edit((d) => {
+                                        d.look = l.id;
+                                        if (l.id === 'ancient') d.styleId = 'ancient';
+                                        else if (d.styleId === 'ancient') d.styleId = 'anime';
+                                    });
+                                }
+                                pop.close();
+                            }}
+                        >
+                            <i className={'fa-solid ' + l.icon}></i>
+                            <span>
+                                <strong>{l.name}</strong>
+                                <span className="muted">{l.hint}</span>
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            </Popover>
+        </>
+    );
+}
+
 /* ------------------------------------------------------------- background */
 
 const BG_GROUPS: { name: string; test: (t: TerrainDef) => boolean }[] = [
@@ -73,6 +126,119 @@ const BG_GROUPS: { name: string; test: (t: TerrainDef) => boolean }[] = [
     { name: 'Water', test: (t) => !!t.water },
     { name: 'Land', test: (t) => !t.sky && !t.water },
 ];
+
+/** A picture of the GM's own under the map: choose, fade, fit, remove. */
+function PictureSection() {
+    const { store, doc } = useMap();
+    const toast = useToast();
+    const input = useRef<HTMLInputElement>(null);
+    const [busy, setBusy] = useState(false);
+    const [, setTick] = useState(0);
+    useEffect(() => onPictureArrived(() => setTick((n) => n + 1)), []);
+    const pic = doc.picture;
+    useEffect(() => { if (pic) void loadPicture(pic.id); }, [pic]);
+    const missing = !!pic && pictureMissing(pic.id);
+
+    const choose = async (file: File) => {
+        setBusy(true);
+        try {
+            const info = await importPicture(file);
+            store.edit((d) => { d.picture = fitPicture(d, info, d.picture?.opacity ?? 1); });
+        } catch (e) {
+            toast('<i class="fa-solid fa-triangle-exclamation"></i> ' + (e as Error).message);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    /* The map takes the picture's shape: as many rows as its columns need. */
+    const fitMap = () => {
+        if (!pic) return;
+        const rows = clampCells(rowsFor(doc.cols, pic));
+        store.edit((d) => {
+            const next = resizeDoc(d, d.cols, rows);
+            return { ...next, picture: { ...pic, x: 0, y: 0, w: next.cols, h: next.rows } };
+        });
+    };
+
+    return (
+        <div className="map-picture" data-map-picture>
+            <div className="map-popover-title">Picture</div>
+            {!pic ? (
+                <p className="map-hint">
+                    A map drawn by hand or in another program, under everything: paint on it, place landmarks,
+                    tokens and labels, fog it, and show it at the Rolling Table like any map.
+                </p>
+            ) : (
+                <>
+                    <div className={'map-picture-name' + (missing ? ' map-warn' : '')}>
+                        <i className={'fa-solid ' + (missing ? 'fa-triangle-exclamation' : 'fa-image')}></i>
+                        <span>{missing ? 'Not in this browser: choose the picture again' : (pic.name || 'Picture')}</span>
+                    </div>
+                    <label className="map-field">
+                        <span>Strength — {Math.round(pic.opacity * 100)}%</span>
+                        <input
+                            type="range" min={0.1} max={1} step={0.05} value={pic.opacity}
+                            onChange={(e) => {
+                                const v = Number(e.currentTarget.value);
+                                store.edit((d) => { if (d.picture) d.picture = { ...d.picture, opacity: v }; }, 'picture-opacity');
+                            }}
+                        />
+                    </label>
+                </>
+            )}
+            <div className="map-picture-actions">
+                <button className="map-chip" disabled={busy} onClick={() => input.current?.click()} data-picture-choose>
+                    <i className={'fa-solid ' + (busy ? 'fa-spinner fa-spin' : 'fa-image')}></i> {pic ? 'Replace…' : 'Choose a picture…'}
+                </button>
+                {pic && (
+                    <>
+                        <button className="map-chip" title="Stretch the picture over the whole map"
+                            onClick={() => store.edit((d) => { if (d.picture) d.picture = { ...d.picture, x: 0, y: 0, w: d.cols, h: d.rows }; })}>
+                            <i className="fa-solid fa-expand"></i> Fit to map
+                        </button>
+                        <button className="map-chip" title="Give the map as many rows as the picture's shape needs, and fit the picture to it" onClick={fitMap}>
+                            <i className="fa-solid fa-crop-simple"></i> Map to its shape
+                        </button>
+                        <button className="map-chip" onClick={() => store.edit((d) => { delete d.picture; })} data-picture-remove>
+                            <i className="fa-solid fa-trash-can"></i> Remove
+                        </button>
+                    </>
+                )}
+            </div>
+            <input
+                ref={input} type="file" accept={PICTURE_ACCEPT} hidden data-picture-input
+                onChange={(e) => {
+                    const file = e.currentTarget.files?.[0];
+                    e.currentTarget.value = '';
+                    if (file) void choose(file);
+                }}
+            />
+        </div>
+    );
+}
+
+/** The picture has a button of its own: inside the background menu, under
+    a button named after a terrain, nobody found it. */
+export function PictureControl() {
+    const { doc } = useMap();
+    const pop = usePopover();
+    return (
+        <>
+            <button
+                ref={pop.anchor} className={'icon-btn map-picture-btn' + (doc.picture ? ' on' : '')} aria-expanded={pop.open}
+                title={doc.picture ? 'Picture under the map: ' + (doc.picture.name || 'your picture')
+                    : 'Load a map drawn by hand or in another program (PNG, JPEG, WebP…)'}
+                onClick={() => pop.setOpen((o) => !o)}
+            >
+                <i className="fa-solid fa-file-import"></i><span className="map-btn-text"> Picture</span> <i className="fa-solid fa-caret-down"></i>
+            </button>
+            <Popover anchor={pop.anchor} open={pop.open} onClose={pop.close} className="map-picture-pop">
+                <PictureSection />
+            </Popover>
+        </>
+    );
+}
 
 export function BackgroundControl() {
     const { store, doc } = useMap();
@@ -83,7 +249,8 @@ export function BackgroundControl() {
         <>
             <button
                 ref={pop.anchor} className="icon-btn map-bg-btn" aria-expanded={pop.open}
-                title={'Background: ' + bg.name + ' — shows wherever nothing is painted'} onClick={() => pop.setOpen((o) => !o)}
+                title={'Background: ' + bg.name + ' — shows wherever nothing is painted'}
+                onClick={() => pop.setOpen((o) => !o)}
             >
                 <span className={'map-bg-chip' + (style.pixelated ? ' pixelated' : '')} style={{ background: swatchBackground(style, bg.slug) }}></span>
                 <span className="map-btn-text"> {bg.name}</span> <i className="fa-solid fa-caret-down"></i>
@@ -91,8 +258,9 @@ export function BackgroundControl() {
             <Popover anchor={pop.anchor} open={pop.open} onClose={pop.close} className="map-bg-pop">
                 <div className="map-popover-title">Background</div>
                 <p className="map-hint">
-                    The layer under everything painted. It shows wherever nothing is painted, and wherever the
-                    eraser rubs terrain out.
+                    {doc.picture
+                        ? 'Under a picture, bare ground shows the picture. The background terrain still decides how painted terrain meets it.'
+                        : 'The layer under everything painted. It shows wherever nothing is painted, and wherever the eraser rubs terrain out.'}
                 </p>
                 {BG_GROUPS.map((g) => (
                     <div key={g.name} className="map-bg-group">
@@ -363,56 +531,106 @@ export function ExportControl() {
     }, [pop.open]);
 
     const size = exportSize(doc, px);
+    /* A picture drawn and waiting for its click: see `save`. */
+    const [ready, setReady] = useState<ExportResult | null>(null);
+    useEffect(() => { setReady(null); }, [px, grid, tokens, fog, doc, folder, pop.open]);
+
+    const name = (doc.name.trim().replace(/[\\/:*?"<>|]+/g, '') || 'map') + '.png';
+
+    /** Puts a finished picture in a file. The save dialog opens only now:
+        the browser makes the file the moment a place is chosen, so a dialog
+        opened before drawing left an EMPTY file there for as long as the
+        drawing took — tokens fetch their pictures, fog is blurred — and for
+        good if it failed. An image viewer opening it meanwhile reported a
+        broken file. False if the dialog was cancelled. */
+    const write = async (out: ExportResult): Promise<boolean> => {
+        let where = name;
+        if (window.showSaveFilePicker) {
+            let handle: FileSystemFileHandle;
+            try {
+                handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'PNG image', accept: { 'image/png': ['.png'] } }] });
+            } catch (e) {
+                if (e && (e as DOMException).name === 'AbortError') return false;
+                throw e;
+            }
+            const w = await handle.createWritable();
+            try {
+                await w.write(out.blob);
+                await w.close();
+            } catch (e) {
+                await w.abort().catch(() => { /* already gone */ });
+                throw e;
+            }
+            where = handle.name;
+        } else {
+            const url = URL.createObjectURL(out.blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+        setReady(null);
+        setNote({
+            text: 'Saved ' + where + ' — ' + out.width + '×' + out.height + ' px.'
+                + (out.missing ? ' ' + out.missing + ' picture' + (out.missing === 1 ? '' : 's') + ' drawn as placeholders.' : ''),
+            warn: false,
+        });
+        toast('<i class="fa-solid fa-image"></i> Map saved as a PNG.');
+        return true;
+    };
+
+    const failNote = (e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        setNote({
+            text: /tainted|insecure|SecurityError/i.test(msg)
+                ? 'The browser would not let the page read one of its pictures back. Choose the app\'s folder below and try again.'
+                : msg,
+            warn: true,
+        });
+    };
+
+    /** The picture waits for a second click when the drawing outlasted the
+        first one: a save dialog may only open straight after a click. */
+    const hold = (out: ExportResult) => {
+        setReady(out);
+        setNote({ text: 'Drawn. Click Save to choose where it goes.', warn: false });
+    };
 
     const save = async () => {
         setBusy(true);
         setNote(null);
+        setReady(null);
         try {
             /* Ask for read access first, while the click still counts as a
-               gesture — the rendering below takes long enough for it not to. */
+               gesture. */
             let dir = folder;
             if (disk && dir && !(await folderReadable(dir))) dir = null;
-            /* The save dialog also needs the gesture: open it before drawing. */
-            const name = (doc.name.trim().replace(/[\\/:*?"<>|]+/g, '') || 'map') + '.png';
-            let handle: FileSystemFileHandle | null = null;
-            if (window.showSaveFilePicker) {
-                try {
-                    handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'PNG image', accept: { 'image/png': ['.png'] } }] });
-                } catch (e) {
-                    if (e && (e as DOMException).name === 'AbortError') { setBusy(false); return; }
-                    throw e;
-                }
-            }
             const out = await renderMapPng(doc, { pxPerCell: px, grid, tokens, fog }, exportLoader(dir));
-            if (handle) {
-                const w = await handle.createWritable();
-                await w.write(out.blob);
-                await w.close();
-            } else {
-                const url = URL.createObjectURL(out.blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = name;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 5000);
+            const act = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+            if (window.showSaveFilePicker && act && !act.isActive) { hold(out); return; }
+            try {
+                await write(out);
+            } catch (e) {
+                if (window.showSaveFilePicker && e && (e as DOMException).name === 'SecurityError') { hold(out); return; }
+                throw e;
             }
-            const where = handle ? handle.name : name;
-            setNote({
-                text: 'Saved ' + where + ' — ' + out.width + '×' + out.height + ' px.'
-                    + (out.missing ? ' ' + out.missing + ' picture' + (out.missing === 1 ? '' : 's') + ' drawn as placeholders.' : ''),
-                warn: false,
-            });
-            toast('<i class="fa-solid fa-image"></i> Map saved as a PNG.');
         } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            setNote({
-                text: /tainted|insecure|SecurityError/i.test(msg)
-                    ? 'The browser would not let the page read one of its pictures back. Choose the app\'s folder below and try again.'
-                    : msg,
-                warn: true,
-            });
+            failNote(e);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const saveReady = async () => {
+        if (!ready) return;
+        setBusy(true);
+        try {
+            await write(ready);
+        } catch (e) {
+            failNote(e);
         } finally {
             setBusy(false);
         }
@@ -472,7 +690,7 @@ export function ExportControl() {
                         </button>
                     </div>
                 )}
-                <button className="accent map-popover-go" disabled={busy || !size.ok} onClick={() => { void save(); }}>
+                <button className="accent map-popover-go" disabled={busy || !size.ok} onClick={() => { void (ready ? saveReady() : save()); }}>
                     {busy ? <><i className="fa-solid fa-circle-notch fa-spin"></i> Drawing…</> : <><i className="fa-solid fa-download"></i> Save {size.w}×{size.h} PNG</>}
                 </button>
                 {note && <p className={'map-hint' + (note.warn ? ' map-warn' : '')}>{note.text}</p>}

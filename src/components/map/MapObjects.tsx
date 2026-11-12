@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { MapSprite } from './MapSprite';
-import { landmarkOf } from '../../map/landmarks';
+import { fillerTerrain, landmarkOf } from '../../map/landmarks';
+import { fillerUrl } from '../../map/fillerStamps';
+import { linkedDoc } from '../../map/world';
 import { landmarkChain, markerChain, pokemonTokenChain } from '../../map/sprites';
-import { midpoint, polygonD, sampleCurve, smoothPathD, taperOutline } from '../../map/geometry';
+import { midpoint, polygonD, riverInkD, sampleCurve, smoothPathD, taperOutline } from '../../map/geometry';
 import type { Pt } from '../../map/geometry';
 import { CELL } from '../../map/render/patterns';
 import { typeColors, TYPE_ICONS } from '../../lib/themeTables';
+import { tokenRing } from '../../map/styles';
 import type { MapStyle } from '../../map/styles';
 import {
     ANCHOR, fontOf, isPlain, labelTransform, labelType, layoutGlyphs, lineBaselines, measureWith,
@@ -37,6 +40,20 @@ function PathShape({ path, style }: { path: MapPath; style: MapStyle }) {
     const casing = Math.max(2, w * 0.3);
     const dash = look.dash?.map((d) => d * w).join(' ');
 
+    if (look.taper && look.engraved) {
+        const ws = look.widthScale;
+        const ink = riverInkD(path.points as Pt[], path.width * 0.25 * ws, path.width * ws, CELL);
+        const bank = Math.max(1.2, CELL * 0.05);
+        return (
+            <>
+                <path d={ink.body} fill={look.color} />
+                <path d={ink.shade} fill="none" stroke={look.engraved} strokeOpacity={0.7} strokeWidth={bank * 0.55} strokeLinecap="round" strokeLinejoin="round" />
+                <path d={ink.flow} fill="none" stroke={look.engraved} strokeOpacity={0.55} strokeWidth={bank * 0.5} strokeLinecap="round" />
+                <path d={ink.hatch} fill="none" stroke={look.engraved} strokeOpacity={0.8} strokeWidth={bank * 0.45} strokeLinecap="round" />
+                <path d={ink.banks} fill="none" stroke={look.engraved} strokeWidth={bank} strokeLinecap="round" strokeLinejoin="round" />
+            </>
+        );
+    }
     if (look.taper) {
         const dense = sampleCurve(path.points as Pt[]);
         const body = polygonD(taperOutline(dense, path.width * 0.25, path.width), CELL);
@@ -123,20 +140,27 @@ export function PathsLayer({ doc, style, selection, draft, onDown }: {
 
 /* ----------------------------------------------------------------- stamps */
 
-function StampView({ stamp, style, selected, alone, onDown }: {
+function StampView({ stamp, style, selected, alone, onDown, opens }: {
     stamp: MapStamp; style: MapStyle; selected: boolean;
     /** Selected on its own: only then does it get resize and turn handles. */
     alone: boolean;
     onDown: ObjectDown;
+    /** The map it opens (World Builder), shown as a door in its corner —
+        in the editor only: pictures of the map leave it out. */
+    opens?: MapDoc;
 }) {
     const def = landmarkOf(stamp.landmark);
     const px = stamp.size * CELL;
+    /* A single filler draws the style's own marker; with none in this
+       style it falls back to the placeholder disc. */
+    const filler = fillerTerrain(stamp.landmark);
+    const fillerArt = filler ? fillerUrl(style, filler, stamp.variant ?? 0) : null;
     const sel = { kind: 'stamp' as const, id: stamp.id };
     const typeColor = stamp.type ? typeColors[stamp.type] : undefined;
     const lab = style.label.small;
     return (
         <div
-            className={'map-obj map-stamp' + (selected ? ' selected' : '')}
+            className={'map-obj map-stamp' + (selected ? ' selected' : '') + (stamp.label && stamp.labelShow === 'hover' ? ' label-hover' : '')}
             data-obj={'stamp:' + stamp.id}
             style={{
                 left: stamp.x * CELL, top: stamp.y * CELL, width: px, height: px,
@@ -144,16 +168,34 @@ function StampView({ stamp, style, selected, alone, onDown }: {
             }}
             onPointerDown={(e) => onDown(e, sel, 'move')}
         >
-            <MapSprite
-                candidates={landmarkChain(style, stamp.landmark)}
-                icon={def.icon}
-                color={def.color}
-                className={'map-stamp-art' + (style.pixelated ? ' pixelated' : '')}
-                style={{ transform: stamp.flip ? 'scaleX(-1)' : undefined, fontSize: px * 0.45 }}
-            />
+            {filler && fillerArt ? (
+                <img
+                    src={fillerArt} alt="" draggable={false}
+                    className={'map-stamp-art map-filler-art' + (style.pixelated ? ' pixelated' : '')}
+                    style={{ transform: stamp.flip ? 'scaleX(-1)' : undefined }}
+                />
+            ) : (
+                <MapSprite
+                    candidates={filler ? [] : landmarkChain(style, stamp.landmark)}
+                    icon={def.icon}
+                    color={def.color}
+                    shape={style.marker}
+                    className={'map-stamp-art' + (style.pixelated ? ' pixelated' : '')}
+                    style={{ transform: stamp.flip ? 'scaleX(-1)' : undefined, fontSize: px * 0.45 }}
+                />
+            )}
             {typeColor && (
-                <span className="map-type-badge" style={{ background: typeColor, fontSize: px * 0.16 }} title={stamp.type}>
+                <span className="map-type-badge" style={{
+                    background: tokenRing(style, typeColor), fontSize: px * 0.16,
+                    borderColor: style.token?.halo, color: style.token?.halo,
+                }} title={stamp.type}>
                     <i className={'fa-solid ' + (TYPE_ICONS[stamp.type!] || 'fa-circle')}></i>
+                </span>
+            )}
+            {opens && (
+                <span className="map-link-badge" data-opens={opens.id} style={{ fontSize: Math.max(8, px * 0.15) }}
+                    title={'Opens ' + (opens.name || 'a map') + ' — double-click to step inside'}>
+                    <i className="fa-solid fa-door-open"></i>
                 </span>
             )}
             {stamp.label && (
@@ -174,15 +216,17 @@ function StampView({ stamp, style, selected, alone, onDown }: {
     );
 }
 
-export function StampsLayer({ doc, style, selection, onDown }: {
+export function StampsLayer({ doc, style, selection, onDown, maps = [] }: {
     doc: MapDoc; style: MapStyle; selection: Selection[]; onDown: ObjectDown;
+    /** Every map, to find what a landmark opens. */
+    maps?: MapDoc[];
 }) {
     return (
         <>
             {doc.stamps.map((s) => (
                 <StampView
                     key={s.id} stamp={s} style={style} selected={isSel(selection, 'stamp', s.id)}
-                    alone={selection.length === 1} onDown={onDown}
+                    alone={selection.length === 1} onDown={onDown} opens={linkedDoc(maps, s)}
                 />
             ))}
         </>
@@ -296,10 +340,10 @@ export function LabelsLayer({ doc, style, selection, onDown }: {
 /** One sketch as the export draws it (map/sketch.ts): line and head in one
     stroke where the brush is solid, and the opacity on the group, so a
     translucent line never darkens where it overlaps itself. */
-export function SketchShape({ sketch }: { sketch: Pick<MapSketch, 'brush' | 'points' | 'color' | 'width' | 'opacity' | 'arrow'> }) {
+export function SketchShape({ sketch }: { sketch: Pick<MapSketch, 'brush' | 'points' | 'color' | 'width' | 'opacity' | 'arrow' | 'straight'> }) {
     const look = sketchLook(sketch, CELL);
     const pts = sketch.points as Pt[];
-    const line = sketchLineD(pts, CELL);
+    const line = sketchLineD(pts, CELL, sketch.straight);
     const head = sketch.arrow ? sketchArrowD(pts, sketch.width, CELL) : '';
     const joined = !!head && arrowInLine(sketch.brush);
     const common = {
@@ -321,7 +365,7 @@ export function SketchesLayer({ doc, selection, draft, onDown }: {
     return (
         <svg className="map-svg map-sketches" width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
             {doc.sketches.map((k) => {
-                const d = sketchLineD(k.points as Pt[], CELL);
+                const d = sketchLineD(k.points as Pt[], CELL, k.straight);
                 const selected = isSel(selection, 'sketch', k.id);
                 return (
                     <g key={k.id}>
@@ -340,30 +384,36 @@ export function SketchesLayer({ doc, selection, draft, onDown }: {
 
 /* ----------------------------------------------------------------- tokens */
 
-function TokenView({ token, style, selected, onDown }: {
+export function TokenView({ token, style, selected, onDown }: {
     token: MapToken; style: MapStyle; selected: boolean; onDown: ObjectDown;
 }) {
     const px = token.size * CELL;
     const candidates = token.kind === 'pokemon' && token.image
         ? pokemonTokenChain(token.image)
         : markerChain(style, token.kind === 'trainer' ? 'trainer' : 'wild');
+    const look = style.token;
+    const ring = tokenRing(style, token.color);
+    const inked = look ? {
+        background: look.disc, boxShadow: `0 0 0 1px ${look.ink}, 0 1px 3px #0005`,
+        '--tok-filter': look.filter, '--tok-ink': look.ink, '--tok-font': look.font, '--tok-halo': look.halo,
+    } as CSSProperties : null;
     return (
         <div
-            className={'map-obj map-token map-token-' + token.kind + (selected ? ' selected' : '')}
+            className={'map-obj map-token map-token-' + token.kind + (look ? ' inked' : '') + (selected ? ' selected' : '')}
             data-obj={'token:' + token.id}
-            style={{ left: token.x * CELL, top: token.y * CELL, width: px, height: px, borderColor: token.color, borderWidth: Math.max(2, px * 0.07) }}
+            style={{ left: token.x * CELL, top: token.y * CELL, width: px, height: px, borderColor: ring, borderWidth: Math.max(2, px * (look ? 0.05 : 0.07)), ...inked }}
             onPointerDown={(e) => onDown(e, { kind: 'token', id: token.id }, 'move')}
             title={token.name}
         >
             <MapSprite
                 candidates={candidates}
                 icon={token.kind === 'trainer' ? 'fa-user' : 'fa-question'}
-                color={token.color}
+                color={ring}
                 className={'map-token-art' + (style.pixelated ? ' pixelated' : '')}
                 style={{ fontSize: px * 0.45 }}
             />
             {token.name && (
-                <span className="map-token-name" style={{ fontSize: Math.max(9, px * 0.26), background: token.color }}>{token.name}</span>
+                <span className="map-token-name" style={{ fontSize: Math.max(9, px * 0.26), background: look ? undefined : token.color }}>{token.name}</span>
             )}
         </div>
     );

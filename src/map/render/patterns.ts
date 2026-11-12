@@ -42,13 +42,15 @@ const noMark: Mark = () => {};
    layout. Painters that already tile by construction — full-width lines, or a
    wrap of their own — are left out, or their shapes would be drawn twice over
    and any translucent ink would darken. */
-const SELF_TILING = new Set(['bricks', 'clouds', 'puffs', 'px-bricks', 'px-clouds']);
+const SELF_TILING = new Set(['bricks', 'clouds', 'puffs', 'px-bricks', 'px-clouds', 'engr-clouds', 'engr-cobbles']);
 
 /* The organic painters use a tile four cells wide rather than two, so their
    scatter repeats half as often and reads as random ground. Their counts are
    written per two-cell tile and scaled up by `area(S)`. */
 const BIG_TILE = new Set(['tussocks', 'tall-tussocks', 'flowers', 'swamp', 'forest-line', 'forest-fill',
-    'jungle-line', 'jungle-fill', 'shrubs', 'bare-trees', 'volcanoes', 'rocks',
+    'jungle-line', 'jungle-fill', 'shrubs', 'bare-trees', 'volcanoes', 'rocks', 'hatch-peaks', 'hatch-snow-peaks',
+    'engr-forest', 'engr-jungle', 'engr-grass', 'engr-flowers', 'engr-dunes', 'engr-mesas', 'engr-tundra', 'engr-drifts',
+    'engr-volcanoes', 'engr-rocks', 'engr-swamp', 'engr-hills',
     'px-flowers', 'px-swamp', 'px-forest', 'px-jungle', 'px-shrubs', 'px-bare-trees', 'px-volcanic', 'px-rocks']);
 
 /** How many cells a side of this pattern's tile covers. */
@@ -239,7 +241,642 @@ function jungle(c: CanvasRenderingContext2D, S: number, ink: string, r: Rng, fil
     }
 }
 
+/* An engraver's mountain range, as an old atlas draws one: peaks in
+   clusters, each a pale lit face and a shadowed flank filled with parallel
+   hatching, under one ink outline. The lit face is nearly opaque, so a peak
+   in front hides the one behind it. `snow` leaves the top of every peak
+   unhatched and paler: bare paper reads as snow. */
+function hatchedRange(c: CanvasRenderingContext2D, S: number, ink: string, r: Rng, mark: Mark, snow: boolean) {
+    const peaks: { x: number; y: number; w: number; h: number; sk: number }[] = [];
+    for (const p of scatter(r, S, Math.round(4 * area(S)), S * 0.11)) {
+        const n = 2 + (r() * 3 | 0);
+        for (let k = 0; k < n; k++) {
+            const w = S * (0.06 + r() * 0.045);
+            peaks.push({
+                x: p.x + (r() - 0.5) * S * 0.14, y: p.y + (r() - 0.5) * S * 0.06,
+                w, h: w * (0.95 + r() * 0.5), sk: (r() - 0.5) * 0.35,
+            });
+        }
+    }
+    peaks.sort((a, b) => a.y - b.y);
+    const lw = S / 125;
+    for (const { x, y, w, h, sk } of peaks) {
+        mark();
+        const top: [number, number] = [x + w * sk, y - h];
+        /* A rugged slope: three jags, one of them sometimes a shoulder. */
+        const slope = (from: [number, number], to: [number, number]): [number, number][] => {
+            const out: [number, number][] = [];
+            for (const t of [0.28, 0.55, 0.8]) {
+                out.push([from[0] + (to[0] - from[0]) * t + (r() - 0.5) * w * 0.28,
+                    from[1] + (to[1] - from[1]) * t + (r() - 0.4) * h * 0.14]);
+            }
+            return out;
+        };
+        const left = slope([x - w, y], top);
+        const right = slope(top, [x + w, y]);
+        const ridgeFoot: [number, number] = [x + w * (0.05 + r() * 0.2), y];
+        const outline = () => {
+            c.beginPath(); c.moveTo(x - w, y);
+            for (const q of left) c.lineTo(q[0], q[1]);
+            c.lineTo(top[0], top[1]);
+            for (const q of right) c.lineTo(q[0], q[1]);
+            c.lineTo(x + w, y);
+        };
+        /* The lit face, over everything behind. */
+        outline(); c.closePath();
+        c.fillStyle = snow ? '#f2ead6f0' : '#e2d3abf0';
+        c.fill();
+        /* The shadowed flank: summit, down the right slope, back up the ridge. */
+        const shadow = () => {
+            c.beginPath(); c.moveTo(top[0], top[1]);
+            for (const q of right) c.lineTo(q[0], q[1]);
+            c.lineTo(x + w, y); c.lineTo(ridgeFoot[0], ridgeFoot[1]); c.closePath();
+        };
+        c.save();
+        shadow();
+        c.fillStyle = shade(ink, 0.2) + (snow ? '26' : '44');
+        c.fill();
+        c.clip();
+        if (snow) { c.beginPath(); c.rect(x - w * 2, y - h * 0.6, w * 4, h); c.clip(); }
+        c.strokeStyle = ink; line(c, lw * 0.75);
+        const step = Math.max(2.5, w * 0.12);
+        for (let d = -h; d < w * 2; d += step) {
+            c.beginPath();
+            c.moveTo(top[0] + d, top[1]);
+            c.lineTo(top[0] + d + h * 0.5, top[1] + h * 1.1);
+            c.stroke();
+        }
+        c.restore();
+        /* A few strokes down the lit face, the ridge, the outline, scree. */
+        c.strokeStyle = ink; line(c, lw * 0.6);
+        for (let k = 0; k < 2; k++) {
+            const t = 0.35 + r() * 0.3, q = left[1];
+            c.beginPath();
+            c.moveTo(q[0] + (top[0] - q[0]) * t, q[1] + (top[1] - q[1]) * t);
+            c.lineTo(q[0] + (top[0] - q[0]) * t - w * 0.12, q[1] + (top[1] - q[1]) * t + h * 0.22);
+            c.stroke();
+        }
+        line(c, lw);
+        c.beginPath(); c.moveTo(top[0], top[1]);
+        c.quadraticCurveTo((top[0] + ridgeFoot[0]) / 2 + w * 0.1, (top[1] + y) / 2, ridgeFoot[0], ridgeFoot[1] - h * 0.1);
+        c.stroke();
+        outline(); c.stroke();
+        line(c, lw * 0.7);
+        for (let k = 0; k < 2; k++) {
+            const bx = x + (r() - 0.2) * w * 1.4;
+            c.beginPath(); c.moveTo(bx, y + h * 0.04); c.lineTo(bx + w * 0.3, y + h * 0.04); c.stroke();
+        }
+    }
+}
+
+/* ---- the engraver's hand: every other Ancient biome, drawn as the
+   mountains are. Light from the upper left; a pale face toward it, the far
+   side tinted and filled with strokes at the mountains' slant, one ink
+   outline over both. */
+
+const ENGR_LIT = '#e2d3abf0';
+
+/** The ink's lighter tint at alpha `a` (two hex digits), whatever alpha the ink had. */
+const tintOf = (ink: string, a: string) => shade(ink.slice(0, 7), 0.2) + a;
+
+/** Parallel strokes over a box, at the mountains' slant. */
+function hatchBox(c: CanvasRenderingContext2D, ink: string, x0: number, y0: number, x1: number, y1: number, step: number, lw: number) {
+    c.strokeStyle = ink; line(c, lw);
+    const run = (y1 - y0) * 0.45;
+    c.beginPath();
+    for (let d = x0 - run; d <= x1; d += step) { c.moveTo(d, y0); c.lineTo(d + run, y1); }
+    c.stroke();
+}
+
+/** A shape engraved: `outline` traces it, `shadow` traces its shaded part
+    (clipped to the shape, with `rule`), `box` bounds the hatching. */
+function engrave(c: CanvasRenderingContext2D, S: number, ink: string, outline: () => void, shadow: () => void,
+    box: [number, number, number, number], opts: { lit?: string; step?: number; rule?: CanvasFillRule; lw?: number } = {}) {
+    const lw = opts.lw ?? S / 125;
+    outline(); c.fillStyle = opts.lit ?? ENGR_LIT; c.fill();
+    c.save();
+    outline(); c.clip();
+    shadow(); c.fillStyle = tintOf(ink, '44'); c.fill(opts.rule ?? 'nonzero'); c.clip(opts.rule ?? 'nonzero');
+    hatchBox(c, ink, box[0], box[1], box[2], box[3], opts.step ?? 2.5, lw * 0.55);
+    c.restore();
+    c.strokeStyle = ink; line(c, lw * 0.9);
+    outline(); c.stroke();
+}
+
+/** A rounded shape engraved, its shade the crescent on the lower right:
+    everything outside an ellipse pushed toward the light. */
+function engraveBlob(c: CanvasRenderingContext2D, S: number, ink: string, outline: () => void,
+    cx: number, cy: number, rx: number, ry: number, opts: { lit?: string; lw?: number } = {}) {
+    const ex = cx - rx * 0.4, ey = cy - ry * 0.45, erx = rx * 0.98, ery = ry * 0.98;
+    engrave(c, S, ink, outline, () => {
+        c.beginPath();
+        c.rect(cx - rx * 2, cy - ry * 2, rx * 4, ry * 4);
+        c.moveTo(ex + erx, ey); c.ellipse(ex, ey, erx, ery, 0, 0, Math.PI * 2);
+    }, [cx - rx * 1.2, cy - ry * 1.2, cx + rx * 1.2, cy + ry * 1.2],
+    { ...opts, rule: 'evenodd', step: Math.max(2.2, Math.min(rx, ry) * 0.24) });
+}
+
+/** A closed outline through points, as a path function. */
+const polyPath = (c: CanvasRenderingContext2D, pts: [number, number][]) => () => {
+    c.beginPath(); c.moveTo(pts[0][0], pts[0][1]);
+    for (const q of pts.slice(1)) c.lineTo(q[0], q[1]);
+    c.closePath();
+};
+
+/** A scalloped crown round (x, y): `lobes` bumps, drawn once with r(). */
+function crownPts(x: number, y: number, rad: number, lobes: number, r: Rng): [number, number][] {
+    const phase = r() * Math.PI, n = lobes * 5, out: [number, number][] = [];
+    for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        const rr = rad * (0.84 + 0.18 * Math.abs(Math.sin(a * lobes / 2 + phase)) + (r() - 0.5) * 0.05);
+        out.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.92]);
+    }
+    return out;
+}
+
+/** A few short strokes at a marker's foot, on its shaded side. */
+function footShadow(c: CanvasRenderingContext2D, ink: string, x: number, y: number, w: number, S: number) {
+    c.strokeStyle = ink; line(c, S / 230);
+    c.beginPath();
+    for (let k = 0; k < 3; k++) {
+        const fx = x + w * (0.1 + k * 0.3);
+        c.moveTo(fx, y + S * 0.002); c.lineTo(fx + w * 0.25, y + S * 0.006);
+    }
+    c.stroke();
+}
+
+function engrTree(c: CanvasRenderingContext2D, S: number, ink: string, x: number, y: number, rad: number, r: Rng, lit: string, lobes = 6) {
+    c.strokeStyle = ink; line(c, S / 140);
+    c.beginPath(); c.moveTo(x, y - rad * 0.4); c.lineTo(x, y); c.stroke();
+    footShadow(c, ink, x, y, rad * 0.9, S);
+    const cy = y - rad * 1.15;
+    engraveBlob(c, S, ink, polyPath(c, crownPts(x, cy, rad, lobes, r)), x, cy, rad, rad * 0.92, { lit });
+}
+
+function engrPine(c: CanvasRenderingContext2D, S: number, ink: string, x: number, y: number, h: number, r: Rng, lit: string) {
+    const w = h * 0.3, base = y - h * 0.1;
+    c.strokeStyle = ink; line(c, S / 140);
+    c.beginPath(); c.moveTo(x, base); c.lineTo(x, y); c.stroke();
+    footShadow(c, ink, x, y, w, S);
+    /* Three tiers, each a jag out on both sides. */
+    const right: [number, number][] = [], left: [number, number][] = [];
+    for (let k = 0; k < 3; k++) {
+        const t = (k + 1) / 3, ty = base - h * 0.9 * (1 - t);
+        const half = w * (0.35 + t * 0.65) * (0.92 + r() * 0.16);
+        right.push([x + half * 0.55, ty - h * 0.1], [x + half, ty]);
+        left.push([x - half * 0.55, ty - h * 0.1], [x - half, ty]);
+    }
+    const top: [number, number] = [x, base - h * 0.9];
+    const pts: [number, number][] = [top, ...right, ...left.reverse()];
+    engrave(c, S, ink, polyPath(c, pts), () => {
+        c.beginPath(); c.moveTo(top[0], top[1] - 2); c.lineTo(x + w * 2, top[1]); c.lineTo(x + w * 2, base + 2); c.lineTo(x + w * 0.1, base + 2); c.closePath();
+    }, [x - w, top[1], x + w * 1.2, base + 2], { lit, step: Math.max(2.2, w * 0.2) });
+}
+
+/** A low mound: drifts, hummocks. */
+function engrMound(c: CanvasRenderingContext2D, S: number, ink: string, x: number, y: number, w: number, h: number, lit: string) {
+    const outline = () => {
+        c.beginPath(); c.moveTo(x - w, y);
+        c.bezierCurveTo(x - w * 0.6, y - h * 1.2, x + w * 0.2, y - h * 1.5, x + w, y);
+        c.closePath();
+    };
+    engraveBlob(c, S, ink, outline, x, y - h * 0.4, w, h * 1.1, { lit });
+}
+
+function engrClouds(c: CanvasRenderingContext2D, S: number, ink: string, r: Rng) {
+    for (let i = 0; i < 3; i++) {
+        const x = r() * S, y = r() * S, rad = S * (0.045 + r() * 0.02), n = 3 + (r() * 2 | 0);
+        for (const [ox, oy] of WRAP) {
+            const bx = x + ox * S, by = y + oy * S, foot = by + rad * 0.35;
+            const end = bx + (n - 1) * rad * 1.3 + rad * 0.9;
+            const body = () => {
+                c.beginPath(); c.moveTo(bx - rad * 0.9, foot);
+                for (let k = 0; k < n; k++) {
+                    const cx = bx + k * rad * 1.3, lift = Math.sin((k + 0.5) / n * Math.PI) * rad * 0.9;
+                    c.arc(cx, by - lift, rad, Math.PI * 0.9, Math.PI * 2.1);
+                }
+                c.lineTo(end, foot); c.closePath();
+            };
+            engrave(c, S, ink, body, () => {
+                c.beginPath(); c.rect(bx - rad * 2, by - rad * 0.15, end - bx + rad * 4, rad * 2);
+            }, [bx - rad, by - rad * 0.2, end, foot], { lit: '#f0e8d4d8', lw: S / 90, step: 2.4 });
+        }
+    }
+}
+
+function engrCobbles(c: CanvasRenderingContext2D, S: number, ink: string, r: Rng) {
+    const rowsN = 8, h = S / rowsN;
+    for (let row = 0; row < rowsN; row++) {
+        const y = row * h, widths: number[] = [];
+        let left = S;
+        while (left > 0) {
+            let w = h * (1 + r() * 0.7);
+            if (left - w < h * 0.7) w = left;
+            widths.push(w); left -= w;
+        }
+        let x = r() * h;
+        for (const w of widths) {
+            for (const ox of [0, -S]) {
+                const sx = x + ox + 1.6, sy = y + 1.6, sw = w - 3.2, sh = h - 3.2;
+                c.fillStyle = '#efe3c255';
+                c.beginPath(); c.roundRect(sx, sy, sw, sh, h * 0.3); c.fill();
+                c.strokeStyle = ink; line(c, S / 220); c.stroke();
+                c.strokeStyle = tintOf(ink, 'cc'); line(c, S / 120);
+                c.beginPath(); c.moveTo(sx + sw * 0.25, sy + sh); c.lineTo(sx + sw - h * 0.2, sy + sh);
+                c.quadraticCurveTo(sx + sw, sy + sh, sx + sw, sy + sh - h * 0.2); c.lineTo(sx + sw, sy + sh * 0.35);
+                c.stroke();
+            }
+            x += w;
+        }
+    }
+}
+
+function engrVolcano(c: CanvasRenderingContext2D, S: number, ink: string, x: number, y: number, r: Rng) {
+    const w = S * (0.07 + r() * 0.03), h = w * (1 + r() * 0.3), top = w * 0.22;
+    const lw = S / 125;
+    const jag = (a: [number, number], b: [number, number]) => [0.35, 0.7].map((t): [number, number] =>
+        [a[0] + (b[0] - a[0]) * t + (r() - 0.5) * w * 0.15, a[1] + (b[1] - a[1]) * t + (r() - 0.5) * h * 0.08]);
+    const tl: [number, number] = [x - top, y - h], tr: [number, number] = [x + top, y - h];
+    const leftSide = jag([x - w, y], tl), rightSide = jag(tr, [x + w, y]);
+    const pts: [number, number][] = [[x - w, y], ...leftSide, tl, tr, ...rightSide, [x + w, y]];
+    footShadow(c, ink, x + w * 0.5, y, w * 0.6, S);
+    engrave(c, S, ink, polyPath(c, pts), () => {
+        c.beginPath(); c.moveTo(x + top * 0.1, y - h); c.lineTo(tr[0], tr[1]);
+        for (const q of rightSide) c.lineTo(q[0], q[1]);
+        c.lineTo(x + w, y); c.lineTo(x + w * 0.15, y); c.closePath();
+    }, [x - w, y - h, x + w, y], { step: Math.max(2.5, w * 0.12) });
+    /* A lava runnel down the lit flank, in the atlas's red. */
+    c.strokeStyle = '#7e2a1caa'; line(c, lw * 0.9);
+    c.beginPath(); c.moveTo(x - top * 0.5, y - h);
+    c.quadraticCurveTo(x - w * 0.25, y - h * 0.55, x - w * 0.45, y - h * 0.15); c.stroke();
+    c.fillStyle = '#7e2a1cd0'; c.strokeStyle = ink; line(c, lw * 0.8);
+    c.beginPath(); c.ellipse(x, y - h, top, top * 0.38, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+    /* Smoke: three puffs rising and drifting right, each engraved. */
+    let px = x + top * 0.3, py = y - h - top * 0.9;
+    for (let k = 0; k < 3; k++) {
+        const pr = top * (0.75 + k * 0.3);
+        const cx = px, cy = py;
+        engraveBlob(c, S, ink, () => { c.beginPath(); c.ellipse(cx, cy, pr, pr * 0.8, 0, 0, Math.PI * 2); }, cx, cy, pr, pr * 0.8,
+            { lit: '#ebe1c6e8', lw: lw * 0.8 });
+        px += pr * (0.9 + r() * 0.4); py -= pr * 1.1;
+    }
+}
+
+/* Hills: low rounded domes, wider than tall, nearer ones over farther.
+   `fill` (Anime) paints them solid with a lit crown and a shaded flank;
+   otherwise (Hand-drawn) a pale wash, an ink outline and a few strokes of
+   shade down the right-hand slope. */
+function hills(c: CanvasRenderingContext2D, S: number, ink: string, r: Rng, mark: Mark, fill: boolean) {
+    for (const p of scatter(r, S, 4, S * 0.27)) {
+        mark();
+        const w = S * (0.12 + r() * 0.05), h = w * (0.5 + r() * 0.15);
+        const dome = () => {
+            c.beginPath();
+            c.moveTo(p.x - w, p.y);
+            c.bezierCurveTo(p.x - w * 0.62, p.y - h * 1.33, p.x + w * 0.62, p.y - h * 1.33, p.x + w, p.y);
+            c.closePath();
+        };
+        if (fill) {
+            dome(); c.fillStyle = shade(ink, 0.3); c.fill();
+            c.save(); dome(); c.clip();
+            c.fillStyle = shade(ink, -0.12);
+            c.beginPath(); c.ellipse(p.x + w * 0.55, p.y, w * 0.6, h * 1.1, 0, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#ffffff40';
+            c.beginPath(); c.ellipse(p.x - w * 0.3, p.y - h * 0.75, w * 0.35, h * 0.22, -0.2, 0, Math.PI * 2); c.fill();
+            c.restore();
+            c.strokeStyle = shade(ink, -0.3); line(c, S / 140);
+            dome(); c.stroke();
+        } else {
+            dome(); c.fillStyle = '#00000012'; c.fill();
+            c.strokeStyle = ink; line(c, S / 110);
+            c.beginPath();
+            c.moveTo(p.x - w, p.y);
+            c.bezierCurveTo(p.x - w * 0.62, p.y - h * 1.33, p.x + w * 0.62, p.y - h * 1.33, p.x + w, p.y);
+            c.stroke();
+            line(c, S / 200);
+            c.beginPath();
+            for (let k = 0; k < 3; k++) {
+                const t = 0.3 + k * 0.2, sx = p.x + w * t, sy = p.y - h * (0.85 - t * 0.7);
+                c.moveTo(sx, sy); c.lineTo(sx + w * 0.08, sy + h * 0.45);
+            }
+            c.stroke();
+        }
+    }
+}
+
 const SMOOTH: Record<string, Painter> = {
+    hills(c, S, ink, r, mark) { hills(c, S, ink, r, mark, false); },
+    'hills-fill'(c, S, ink, r, mark) { hills(c, S, ink, r, mark, true); },
+    'engr-hills'(c, S, ink, r, mark) {
+        /* Rolling downs: wide low mounds, lit on the left, hatched on the right. */
+        for (const p of scatter(r, S, Math.round(4 * area(S)), S * 0.18)) {
+            mark();
+            const w = S * (0.065 + r() * 0.03);
+            engrMound(c, S, ink, p.x, p.y, w, w * (0.48 + r() * 0.12), '#efe4c6ee');
+        }
+    },
+    'hatch-peaks'(c, S, ink, r, mark) { hatchedRange(c, S, ink, r, mark, false); },
+    'hatch-snow-peaks'(c, S, ink, r, mark) { hatchedRange(c, S, ink, r, mark, true); },
+    'engr-forest'(c, S, ink, r, mark) {
+        /* Close rows of round crowns, a pine in every third place or so. */
+        const n = Math.round(4 * Math.sqrt(area(S)));
+        const things: { x: number; y: number; pine: boolean; size: number }[] = [];
+        for (let row = 0; row < n; row++) {
+            for (let col = 0; col < n; col++) {
+                const x = (col + (row % 2) * 0.5 + (r() - 0.5) * 0.35) * S / n;
+                const y = (row + 0.75 + (r() - 0.5) * 0.25) * S / n;
+                const pine = r() < 0.3;
+                things.push({ x, y, pine, size: pine ? S * (0.11 + r() * 0.03) : S * (0.045 + r() * 0.012) });
+            }
+        }
+        things.sort((a, b) => a.y - b.y);
+        for (const t of things) {
+            mark();
+            if (t.pine) engrPine(c, S, ink, t.x, t.y, t.size, r, '#dcd3a8f0');
+            else engrTree(c, S, ink, t.x, t.y, t.size, r, '#dcd3a8f0');
+        }
+    },
+    'engr-jungle'(c, S, ink, r, mark) {
+        /* Big many-lobed crowns packed tight, and palms leaning out of them. */
+        const k = area(S);
+        const things = [
+            ...scatter(r, S, Math.round(10 * k), S * 0.1).map((p) => ({ ...p, palm: false })),
+            ...scatter(r, S, Math.round(3 * k), S * 0.2).map((p) => ({ ...p, palm: true })),
+        ].sort((a, b) => a.y - b.y);
+        for (const t of things) {
+            mark();
+            if (!t.palm) { engrTree(c, S, ink, t.x, t.y, S * (0.055 + r() * 0.015), r, '#d6d2a0f0', 8); continue; }
+            const h = S * (0.14 + r() * 0.04), lean = (r() - 0.5) * h * 0.5;
+            const tx = t.x + lean, ty = t.y - h;
+            footShadow(c, ink, t.x, t.y, h * 0.25, S);
+            c.strokeStyle = ink; line(c, S / 90);
+            c.beginPath(); c.moveTo(t.x, t.y); c.quadraticCurveTo(t.x + lean * 0.2, t.y - h * 0.55, tx, ty); c.stroke();
+            for (let j = 0; j < 6; j++) {
+                const a = -Math.PI / 2 + (j / 5 - 0.5) * Math.PI * 1.45 + (r() - 0.5) * 0.2;
+                const len = h * (0.45 + r() * 0.12);
+                const ex = tx + Math.cos(a) * len, ey = ty + Math.sin(a) * len * 0.55 + len * 0.35;
+                const mx = tx + Math.cos(a) * len * 0.5, my = ty + Math.sin(a) * len * 0.5 - len * 0.12;
+                const nx = -Math.sin(a) * len * 0.13, ny = Math.cos(a) * len * 0.13;
+                c.beginPath(); c.moveTo(tx, ty);
+                c.quadraticCurveTo(mx + nx, my + ny, ex, ey);
+                c.quadraticCurveTo(mx - nx, my - ny, tx, ty);
+                /* The fronds away from the light are tinted. */
+                c.fillStyle = Math.cos(a) > 0.2 ? tintOf(ink, '66') : '#d6d2a0f0'; c.fill();
+                c.strokeStyle = ink; line(c, S / 150); c.stroke();
+                c.beginPath(); c.moveTo(tx, ty); c.quadraticCurveTo(mx, my, ex, ey); c.stroke();
+            }
+        }
+    },
+    'engr-grass'(c, S, ink, r, mark) {
+        /* Tall grass: stiff clumps of strokes, a shadow at each foot. */
+        for (const p of scatter(r, S, Math.round(12 * area(S)), S * 0.07)) {
+            mark();
+            const h = S * (0.05 + r() * 0.025), n = 7 + (r() * 3 | 0);
+            c.strokeStyle = ink; line(c, S / 150);
+            c.beginPath();
+            for (let k = 0; k < n; k++) {
+                const a = (k / (n - 1) - 0.5) * 0.9 + (r() - 0.5) * 0.15;
+                const bx = p.x + (k - (n - 1) / 2) * h * 0.07, len = h * (0.7 + r() * 0.35);
+                c.moveTo(bx, p.y);
+                c.quadraticCurveTo(bx + Math.sin(a) * len * 0.3, p.y - len * 0.6, bx + Math.sin(a) * len, p.y - Math.cos(a) * len);
+            }
+            c.stroke();
+            footShadow(c, ink, p.x, p.y, h * 0.6, S);
+        }
+    },
+    'engr-flowers'(c, S, ink, r, mark) {
+        /* A meadow in ink: small open flowers on stems, leaves either side. */
+        for (const p of scatter(r, S, Math.round(12 * area(S)), S * 0.065)) {
+            mark();
+            const h = S * (0.03 + r() * 0.015), pr = S * (0.008 + r() * 0.004), turn = r() * Math.PI;
+            const hx = p.x + (r() - 0.5) * h * 0.3, hy = p.y - h;
+            c.strokeStyle = ink; line(c, S / 200);
+            c.beginPath(); c.moveTo(p.x, p.y); c.quadraticCurveTo(p.x, p.y - h * 0.5, hx, hy); c.stroke();
+            for (const side of [-1, 1]) {
+                const lx = p.x + side * h * 0.22, ly = p.y - h * 0.3;
+                c.fillStyle = side > 0 ? tintOf(ink, '88') : ENGR_LIT;
+                c.beginPath(); c.ellipse(lx, ly, h * 0.2, h * 0.07, side * 0.5, 0, Math.PI * 2); c.fill(); c.stroke();
+            }
+            for (let k = 0; k < 5; k++) {
+                const a = turn + k * Math.PI * 2 / 5, qx = hx + Math.cos(a) * pr, qy = hy + Math.sin(a) * pr;
+                c.fillStyle = Math.cos(a) + Math.sin(a) > 0.6 ? tintOf(ink, '77') : '#efe4c8';
+                c.beginPath(); c.arc(qx, qy, pr * 0.72, 0, Math.PI * 2); c.fill(); c.stroke();
+            }
+            c.fillStyle = ink;
+            c.beginPath(); c.arc(hx, hy, pr * 0.4, 0, Math.PI * 2); c.fill();
+            footShadow(c, ink, p.x, p.y, h * 0.4, S);
+        }
+    },
+    'engr-dunes'(c, S, ink, r, mark) {
+        /* Crescent dunes: a crest line, the slip face under it hatched, and
+           fine stipple of sand between. */
+        c.fillStyle = tintOf(ink, '99');
+        for (let i = 0; i < 30 * area(S); i++) { c.beginPath(); c.arc(r() * S, r() * S, S / 500 + r() * S / 600, 0, Math.PI * 2); c.fill(); }
+        for (const p of scatter(r, S, Math.round(5 * area(S)), S * 0.16)) {
+            mark();
+            const w = S * (0.07 + r() * 0.04), h = w * (0.35 + r() * 0.15);
+            const L: [number, number] = [p.x - w, p.y], R: [number, number] = [p.x + w, p.y + h * 0.15];
+            const crest = () => { c.moveTo(L[0], L[1]); c.quadraticCurveTo(p.x - w * 0.1, p.y - h * 1.9, R[0], R[1]); };
+            const body = () => { c.beginPath(); crest(); c.quadraticCurveTo(p.x + w * 0.1, p.y + h * 0.5, L[0], L[1]); c.closePath(); };
+            engrave(c, S, ink, body, () => {
+                c.beginPath(); crest(); c.quadraticCurveTo(p.x + w * 0.3, p.y - h * 0.3, L[0], L[1]); c.closePath();
+            }, [L[0], p.y - h, R[0], R[1]], { lit: '#ecdcb2d0', lw: S / 160, step: 2.3 });
+            c.strokeStyle = ink; line(c, S / 110);
+            c.beginPath(); crest(); c.stroke();
+        }
+    },
+    'engr-mesas'(c, S, ink, r, mark) {
+        /* Badlands: flat-topped buttes in layered rock, and dry scrub. */
+        const k = area(S);
+        const things = [
+            ...scatter(r, S, Math.round(2 * k), S * 0.24).map((p) => ({ ...p, mesa: true })),
+            ...scatter(r, S, Math.round(5 * k), S * 0.1).map((p) => ({ ...p, mesa: false })),
+        ].sort((a, b) => a.y - b.y);
+        for (const t of things) {
+            mark();
+            const { x, y } = t;
+            if (!t.mesa) {
+                const h = S * (0.03 + r() * 0.015);
+                c.strokeStyle = ink; line(c, S / 160);
+                c.beginPath();
+                for (let j = 0; j < 5; j++) {
+                    const a = (j / 4 - 0.5) * 2 + (r() - 0.5) * 0.3;
+                    c.moveTo(x, y); c.lineTo(x + Math.sin(a) * h, y - Math.cos(a) * h * 0.85);
+                }
+                c.stroke();
+                footShadow(c, ink, x, y, h * 0.7, S);
+                continue;
+            }
+            const w = S * (0.07 + r() * 0.03), h = w * (0.5 + r() * 0.2), tw = w * (0.55 + r() * 0.2);
+            const wob = () => (r() - 0.5) * w * 0.08;
+            const pts: [number, number][] = [[x - w, y], [x - w * 0.82 + wob(), y - h * 0.4], [x - tw - w * 0.05, y - h * 0.75],
+                [x - tw, y - h], [x + tw, y - h + wob() * 0.3], [x + tw + w * 0.06, y - h * 0.7], [x + w * 0.85 + wob(), y - h * 0.35], [x + w, y]];
+            footShadow(c, ink, x + w * 0.4, y, w * 0.7, S);
+            engrave(c, S, ink, polyPath(c, pts), () => {
+                c.beginPath(); c.moveTo(x + tw * 0.35, y - h - 2); c.lineTo(x + w * 2, y - h - 2); c.lineTo(x + w * 2, y + 2); c.lineTo(x + w * 0.3, y + 2); c.closePath();
+            }, [x - w, y - h, x + w, y], { step: Math.max(2.5, w * 0.11) });
+            /* Strata across the lit face, and the rim of the table top. */
+            c.strokeStyle = ink; line(c, S / 220);
+            c.save(); polyPath(c, pts)(); c.clip();
+            c.beginPath();
+            for (const f of [0.4, 0.68]) { c.moveTo(x - w, y - h * f + wob()); c.lineTo(x + w * 0.35, y - h * f + wob()); }
+            c.moveTo(x - tw * 0.9, y - h * 0.86); c.lineTo(x + tw * 0.9, y - h * 0.88);
+            c.stroke();
+            c.restore();
+        }
+    },
+    'engr-tundra'(c, S, ink, r, mark) {
+        /* Tundra: bare trees, thinner than Hand-drawn's, and low hummocks. */
+        const k = area(S);
+        const things = [
+            ...scatter(r, S, Math.round(4 * k), S * 0.15).map((p) => ({ ...p, tree: true })),
+            ...scatter(r, S, Math.round(4 * k), S * 0.12).map((p) => ({ ...p, tree: false })),
+        ].sort((a, b) => a.y - b.y);
+        for (const p of things) {
+            mark();
+            if (!p.tree) { engrMound(c, S, ink, p.x, p.y, S * (0.035 + r() * 0.02), S * 0.018, '#ece2c8e8'); continue; }
+            const h = S * (0.13 + r() * 0.05), lean = (r() - 0.5) * h * 0.08;
+            footShadow(c, ink, p.x, p.y, h * 0.3, S);
+            c.strokeStyle = ink; line(c, S / 90);
+            c.beginPath(); c.moveTo(p.x, p.y); c.quadraticCurveTo(p.x + lean, p.y - h * 0.5, p.x + lean * 0.6, p.y - h); c.stroke();
+            for (let j = 0; j < 4; j++) {
+                const t = 0.35 + j * 0.17, bx = p.x + lean * t, by = p.y - h * t, len = h * (0.3 - j * 0.055);
+                line(c, S / (150 + j * 30));
+                c.beginPath();
+                for (const side of [-1, 1]) {
+                    if (j > 0 && r() < 0.2) continue;
+                    c.moveTo(bx, by); c.lineTo(bx + side * len * 0.8, by - len * 0.75);
+                    c.moveTo(bx + side * len * 0.5, by - len * 0.46); c.lineTo(bx + side * len * 0.75, by - len * 0.95);
+                }
+                c.stroke();
+            }
+        }
+    },
+    'engr-drifts'(c, S, ink, r, mark) {
+        /* Snow: wind-drifts, white on their lit side, hatched on the far one. */
+        c.fillStyle = tintOf(ink, '88');
+        for (let i = 0; i < 6 * area(S); i++) { c.beginPath(); c.arc(r() * S, r() * S, S / 450, 0, Math.PI * 2); c.fill(); }
+        for (const p of scatter(r, S, Math.round(5 * area(S)), S * 0.15)) {
+            mark();
+            const w = S * (0.05 + r() * 0.03);
+            engrMound(c, S, ink, p.x, p.y, w, w * (0.28 + r() * 0.1), '#f4ede0f0');
+        }
+    },
+    'engr-volcanoes'(c, S, ink, r, mark) {
+        /* Volcanic ground: red cracks in the rock, cinder specks, and cones
+           engraved like the mountains, smoking. */
+        const k = area(S);
+        for (let i = 0; i < 3 * k; i++) {
+            let x = r() * S, y = r() * S;
+            c.strokeStyle = '#7e2a1c88'; line(c, S / 160);
+            c.beginPath(); c.moveTo(x, y);
+            for (let j = 0; j < 5; j++) { x += (r() - 0.3) * S * 0.05; y += (r() - 0.5) * S * 0.04; c.lineTo(x, y); }
+            c.stroke();
+        }
+        c.fillStyle = tintOf(ink, 'aa');
+        for (let i = 0; i < 12 * k; i++) { c.beginPath(); c.arc(r() * S, r() * S, S / 450 + r() * S / 500, 0, Math.PI * 2); c.fill(); }
+        for (const p of scatter(r, S, Math.round(2.5 * k), S * 0.22)) {
+            mark();
+            engrVolcano(c, S, ink, p.x, p.y, r);
+        }
+    },
+    'engr-rocks'(c, S, ink, r, mark) {
+        /* Cave floor: boulders and stalagmites, each lit and hatched, and
+           pebbles between them. */
+        c.strokeStyle = ink; line(c, S / 260);
+        for (let i = 0; i < 10 * area(S); i++) { c.beginPath(); c.arc(r() * S, r() * S, S * (0.003 + r() * 0.003), 0, Math.PI * 2); c.stroke(); }
+        for (const p of scatter(r, S, Math.round(8 * area(S)), S * 0.09)) {
+            mark();
+            const s = S * (0.022 + r() * 0.016);
+            if (r() < 0.7) {
+                const pts: [number, number][] = [];
+                for (let j = 0; j < 7; j++) {
+                    const a = j / 7 * Math.PI * 2, rr = s * (0.8 + r() * 0.35);
+                    pts.push([p.x + Math.cos(a) * rr, p.y - s * 0.6 + Math.sin(a) * rr * 0.72]);
+                }
+                footShadow(c, ink, p.x, p.y + s * 0.1, s, S);
+                engraveBlob(c, S, ink, polyPath(c, pts), p.x, p.y - s * 0.6, s, s * 0.72);
+                c.strokeStyle = ink; line(c, S / 220);
+                c.beginPath(); c.moveTo(p.x - s * 0.4, p.y - s * 0.9); c.lineTo(p.x - s * 0.1, p.y - s * 0.55); c.lineTo(p.x + s * 0.1, p.y - s * 0.7); c.stroke();
+                continue;
+            }
+            const pts: [number, number][] = [[p.x - s * 0.6, p.y], [p.x - s * 0.1, p.y - s * 2], [p.x + s * 0.15, p.y - s * 1.8], [p.x + s * 0.6, p.y]];
+            footShadow(c, ink, p.x, p.y, s * 0.8, S);
+            engrave(c, S, ink, polyPath(c, pts), () => {
+                c.beginPath(); c.moveTo(p.x - s * 0.05, p.y - s * 2.1); c.lineTo(p.x + s, p.y - s * 2.1); c.lineTo(p.x + s, p.y + 2); c.lineTo(p.x + s * 0.05, p.y + 2); c.closePath();
+            }, [p.x - s * 0.6, p.y - s * 2, p.x + s * 0.6, p.y], { step: 2.2 });
+        }
+    },
+    'engr-swamp'(c, S, ink, r, mark) {
+        /* Still water drawn as short level strokes; reed beds, hummocks and
+           now and then a gnarled tree on its roots. */
+        const k = area(S);
+        c.strokeStyle = tintOf(ink, 'cc'); line(c, S / 200);
+        c.beginPath();
+        for (let i = 0; i < 7 * k; i++) {
+            const x = r() * S, y = r() * S, w = S * (0.03 + r() * 0.03);
+            for (let j = 0; j < 3; j++) { c.moveTo(x + j * w * 0.15, y + j * S * 0.009); c.lineTo(x + w * (1 - j * 0.3), y + j * S * 0.009); }
+        }
+        c.stroke();
+        const things = [
+            ...scatter(r, S, Math.round(5 * k), S * 0.1).map((p) => ({ ...p, kind: 0 })),
+            ...scatter(r, S, Math.round(3 * k), S * 0.12).map((p) => ({ ...p, kind: 1 })),
+            ...scatter(r, S, Math.round(1 * k), S * 0.25).map((p) => ({ ...p, kind: 2 })),
+        ].sort((a, b) => a.y - b.y);
+        for (const t of things) {
+            mark();
+            if (t.kind === 0) {
+                const h = S * (0.05 + r() * 0.015);
+                c.strokeStyle = ink; line(c, S / 170);
+                c.beginPath();
+                for (let j = -2; j <= 2; j++) {
+                    c.moveTo(t.x + j * S * 0.007, t.y);
+                    c.quadraticCurveTo(t.x + j * S * 0.011, t.y - h * 0.6, t.x + j * S * 0.018, t.y - h * (1 - Math.abs(j) * 0.18));
+                }
+                c.stroke();
+                c.fillStyle = ink;
+                c.beginPath(); c.ellipse(t.x + S * 0.004, t.y - h * 0.92, S * 0.0035, S * 0.011, 0.1, 0, Math.PI * 2); c.fill();
+                footShadow(c, ink, t.x, t.y, h * 0.5, S);
+            } else if (t.kind === 1) {
+                const w = S * (0.03 + r() * 0.015);
+                engrMound(c, S, ink, t.x, t.y, w, w * 0.4, '#d6cfa6e8');
+                c.strokeStyle = ink; line(c, S / 220);
+                c.beginPath();
+                for (let j = 0; j < 4; j++) { const bx = t.x - w * 0.4 + j * w * 0.25; c.moveTo(bx, t.y - w * 0.35); c.lineTo(bx + (j - 1.5) * w * 0.08, t.y - w * 0.7); }
+                c.stroke();
+            } else {
+                const h = S * (0.1 + r() * 0.03), base = t.y - h * 0.3;
+                c.strokeStyle = ink; line(c, S / 150);
+                c.beginPath();
+                for (let j = 0; j < 5; j++) {
+                    const dx = (j / 4 - 0.5) * h * 0.8;
+                    c.moveTo(t.x + dx * 0.15, base); c.quadraticCurveTo(t.x + dx * 0.9, base - h * 0.08, t.x + dx, t.y);
+                }
+                c.moveTo(t.x, base); c.lineTo(t.x, base - h * 0.3);
+                c.stroke();
+                engrTree(c, S, ink, t.x, base - h * 0.15, h * 0.28, r, '#d6cfa6f0', 7);
+            }
+        }
+    },
+    'engr-water'(c, S, ink, r) {
+        /* Engraved water: little runs of two or three level strokes. */
+        c.strokeStyle = ink; line(c, S / 170);
+        c.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const x = r() * S, y = r() * S, w = S * (0.07 + r() * 0.06), n = 2 + (r() * 2 | 0);
+            for (let j = 0; j < n; j++) { c.moveTo(x + j * w * 0.18, y + j * S * 0.022); c.lineTo(x + w * (1 - j * 0.25), y + j * S * 0.022); }
+        }
+        c.stroke();
+    },
+    'engr-stipple'(c, S, ink, r) {
+        /* Sand as an engraver stipples it, with a pebble here and there. */
+        c.fillStyle = ink;
+        for (let i = 0; i < 70; i++) { c.beginPath(); c.arc(r() * S, r() * S, S / 520 + r() * S / 620, 0, Math.PI * 2); c.fill(); }
+        c.strokeStyle = ink; line(c, S / 300);
+        for (let i = 0; i < 3; i++) { c.beginPath(); c.ellipse(r() * S, r() * S, S * 0.01, S * 0.007, r(), 0, Math.PI * 2); c.stroke(); }
+    },
+    'engr-clouds'(c, S, ink, r) { engrClouds(c, S, ink, r); },
+    'engr-cobbles'(c, S, ink, r) { engrCobbles(c, S, ink, r); },
     waves(c, S, ink, r) {
         c.strokeStyle = ink; line(c, S / 70);
         for (let i = 0; i < 5; i++) {
@@ -673,6 +1310,24 @@ function pxPine(c: CanvasRenderingContext2D, ox: number, oy: number, ink: string
 }
 
 const PIXEL: Record<string, Painter> = {
+    'px-hills'(c, S, ink, r, mark) {
+        /* Little grassy knolls, eleven texels wide: a lit top-left, a
+           shaded underside, a dark rim. */
+        const rows: [number, number][] = [[3, 5], [1, 9], [0, 11], [0, 11], [0, 11]];
+        for (const p of scatter(r, S, 3, S * 0.36)) {
+            mark();
+            const ox = p.x | 0, oy = p.y | 0;
+            c.fillStyle = shade(ink, -0.35);
+            rows.forEach(([x0, w], y) => { px(c, ox + x0, oy + y - 1, w, 1); });
+            px(c, ox - 1, oy + 1, 1, 4); px(c, ox + 11, oy + 1, 1, 4);
+            c.fillStyle = ink;
+            rows.forEach(([x0, w], y) => { if (y > 0) px(c, ox + x0 + (y === 1 ? 1 : 0), oy + y, w - (y === 1 ? 2 : 0), 1); });
+            c.fillStyle = shade(ink, 0.35);
+            px(c, ox + 3, oy + 1, 3, 1); px(c, ox + 2, oy + 2, 2, 1);
+            c.fillStyle = shade(ink, -0.18);
+            px(c, ox + 1, oy + 4, 9, 1); px(c, ox + 8, oy + 2, 2, 2);
+        }
+    },
     'px-waves'(c, S, ink, r) {
         c.fillStyle = ink;
         for (let i = 0; i < 6; i++) px(c, r() * S, r() * S, 3 + (r() * 3 | 0), 1);
@@ -961,6 +1616,9 @@ export interface MarkerSprite {
     x: number; y: number; w: number; h: number;
     /** Summed-area table of its inked texels, (w + 1) x (h + 1). */
     ink: Int32Array;
+    /** Which `mark()` call of the painter drew it, counting from 0 — a
+        marker that left no ink has none, so this is not its list index. */
+    ordinal: number;
 }
 
 export interface PatternParts {
@@ -1002,7 +1660,7 @@ export function patternParts(name: string, ink: string): PatternParts | null {
     const [markC, mx] = tileCanvas(W);
     gx.translate(pad, pad);
     mx.translate(pad, pad);
-    let cur = gx, inMarker = false, groundInk = false;
+    let cur = gx, inMarker = false, groundInk = false, ordinal = -1;
     const sprites: MarkerSprite[] = [];
     const flush = () => {
         if (!inMarker) return;
@@ -1028,12 +1686,13 @@ export function patternParts(name: string, ink: string): PatternParts | null {
                 ink[(y + 1) * (w + 1) + x + 1] = ink[y * (w + 1) + x + 1] + row;
             }
         }
-        sprites.push({ canvas, x: x0 - pad, y: y0 - pad, w, h, ink });
+        sprites.push({ canvas, x: x0 - pad, y: y0 - pad, w, h, ink, ordinal });
     };
     const mark: Mark = (on = true) => {
         flush();
         const next = on ? mx : gx;
         if (on) {
+            ordinal++;
             mx.save(); mx.setTransform(1, 0, 0, 1, 0, 0); mx.clearRect(0, 0, W, W); mx.restore();
         }
         for (const k of STATE) (next as unknown as Record<string, unknown>)[k] = cur[k];
@@ -1075,4 +1734,55 @@ export function patternParts(name: string, ink: string): PatternParts | null {
     const out = { S, ground, markers, sprites };
     parts.set(key, out);
     return out;
+}
+
+/* ------------------------------------------------------------ one marker, big
+
+   A filler placed on its own (a landmark of the "Fillers" group) is ONE of a
+   terrain's markers, drawn as large as the GM likes. Scaling its tile sprite
+   up would blur it, so the painter runs again through a stand-in context
+   that sends only that marker's drawing to a canvas, scaled up as vector
+   drawing — everything else goes nowhere. The painter is deterministic, so
+   it draws the same marker. Pixel painters keep their sprite: their art is
+   meant to be scaled up blocky. */
+
+const bigSprites = new Map<string, HTMLCanvasElement | null>();
+
+export function markerArt(name: string, ink: string, index: number, target = 256): HTMLCanvasElement | null {
+    const parts = patternParts(name, ink);
+    const sprite = parts?.sprites[index];
+    if (!parts || !sprite) return null;
+    if (isPixelPattern(name)) return sprite.canvas;
+    const key = name + '|' + ink + '|' + index + '|' + target;
+    if (bigSprites.has(key)) return bigSprites.get(key)!;
+    const painter = SMOOTH[name];
+    const f = Math.max(1, Math.min(24, target / Math.max(sprite.w, sprite.h)));
+    const [canvas, cx] = tileCanvas(1);
+    canvas.width = Math.ceil(sprite.w * f) + 2;
+    canvas.height = Math.ceil(sprite.h * f) + 2;
+    cx.setTransform(f, 0, 0, f, 1 - sprite.x * f, 1 - sprite.y * f);
+    const [, nowhere] = tileCanvas(1);
+    let cur: CanvasRenderingContext2D = nowhere, ordinal = -1;
+    const mark: Mark = (on = true) => {
+        if (on) ordinal++;
+        const next = on && ordinal === sprite.ordinal ? cx : nowhere;
+        for (const k of STATE) (next as unknown as Record<string, unknown>)[k] = cur[k];
+        cur = next;
+    };
+    const stand = new Proxy({}, {
+        get(_, prop: string) {
+            const v = (cur as unknown as Record<string, unknown>)[prop];
+            if (typeof v !== 'function') return v;
+            return (...args: unknown[]) => (v as (...a: unknown[]) => unknown).apply(cur, args);
+        },
+        set(_, prop: string, v) {
+            (cur as unknown as Record<string, unknown>)[prop] = v;
+            return true;
+        },
+    }) as CanvasRenderingContext2D;
+    /* A line width set while drawing elsewhere must still scale: the
+       transform carries it, as it does every coordinate. */
+    painter(stand, parts.S, ink, rng(seedOf(name)), mark);
+    bigSprites.set(key, canvas);
+    return canvas;
 }

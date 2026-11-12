@@ -12,8 +12,8 @@ import { applyUpdate, dismissUpdate, subscribeToUpdate, updateIsWaiting } from '
    IS a reload, so it says so rather than doing it quietly.
 
    The server-side snapshot never lies about a version; a browser can. Anyone
-   chasing "the live site is missing a feature" should read the service-worker
-   note in CLAUDE.md before touching the deploy. */
+   chasing "the live site is missing a feature" should compare it with `curl`,
+   which has no service worker, before touching the deploy. */
 export function UpdatePrompt() {
     const waiting = useSyncExternalStore(subscribeToUpdate, updateIsWaiting, () => false);
     if (!waiting) return null;

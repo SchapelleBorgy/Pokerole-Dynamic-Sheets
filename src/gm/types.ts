@@ -23,6 +23,28 @@ export interface GmWild {
     wid?: string;
 }
 
+/** A roster trainer shared with the rolling table open in this browser
+    (src/table/npcShare.ts). Member ids are the table's. */
+export interface GmNpcShare {
+    /** Who sees it; null for the whole table. */
+    to: string[] | null;
+    /** Who may change it. Read only for everyone else. */
+    edit: string[];
+}
+
+/** A wild Pokémon offered to a player at the table, waiting for an answer.
+    The card goes as it was when it was offered. */
+export interface GmGift {
+    oid: string;
+    /** The roster wild it came from; it leaves the roster once accepted. */
+    gid: string;
+    to: string;
+    toName: string;
+    dexId: string;
+    sheet: CardSheet;
+    at: number;
+}
+
 export interface GmNoteSheet {
     gid: string;
     title: string;
@@ -41,6 +63,11 @@ export interface GmNpc {
     nature?: string;
 }
 
+/** One action a combatant did this Round, one entry per pip filled: an
+    Accuracy (with its move's name), an Evasion, a Clash, or a turn passed
+    without any of the three. */
+export interface ActLogEntry { k: 'acc' | 'eva' | 'clash' | 'turn'; move?: string }
+
 export interface GmCombatant {
     gid: string;
     /** How to find the live sheet: a trainer, one of their Pokémon, or a wild. */
@@ -48,11 +75,19 @@ export interface GmCombatant {
     name?: string;
     initiative?: number;
     actions?: number;
-    /** Clash and Evasion are once per Round each, whichever of the two Clash
-        pools was used, so the tracker carries a mark for each rather than a
-        count. Cleared when the Round advances, exactly as the action pips are. */
-    usedClash?: boolean;
-    usedEva?: boolean;
+    /** How many Clashes and Evasions this Round, whichever of the two Clash
+        pools was used. Once a Round each, unless the character's combat
+        offsets allow more (`extraClash` / `extraEva`, lib/combatMods). A
+        board saved when these were marks has `true` for one: read them with
+        `usedCount`. Cleared when the Round advances, as the action pips are. */
+    usedClash?: boolean | number;
+    usedEva?: boolean | number;
+    /** The moves used this Round, by name: a move is once a Round. Marked
+        when its Accuracy is rolled, cleared with the pips. */
+    usedMoves?: string[];
+    /** Every action done this Round, in order (src/gm/turns.ts): what the
+        tracker's hover on the sprite lists. Cleared with the pips. */
+    actLog?: ActLogEntry[];
     [key: string]: unknown;
 }
 
@@ -68,9 +103,15 @@ export interface GmCombat {
     /** Turns are being kept: the GM started them, and has not stopped them. */
     turnsOn: boolean;
     /** The turn tracker: the pid whose turn it is, or null — turns not kept,
-        or everyone's actions spent for the Round. A turn costs its combatant one action, filled the moment
-        the turn starts — see src/gm/turns.ts. */
+        or everyone's actions spent for the Round. A turn costs its combatant
+        one action, its pip filled when the turn is over — see src/gm/turns.ts. */
     turn: string | null;
+    /** Pips count actions DONE. A fight saved before that filled the current
+        turn's pip as it started, and loses that one pip once on load. */
+    pipsDone?: boolean;
+    /** The combatant on turn has already rolled its action (an Accuracy, an
+        Evasion or a Clash), so passing the turn fills no further pip. */
+    turnSpent?: boolean;
     /** Who has had their turn in this pass. Everyone passing starts the next
         pass, a new action for each; only the GM starts a new Round. */
     passed: string[];
@@ -87,6 +128,8 @@ export interface GmCombat {
 export interface GmTablePc {
     /** The player's display name at the table. */
     player: string;
+    /** The colour they chose at the table (src/table/colors.ts). */
+    color?: number;
     trainer: SlimTrainer | null;
     mons: Record<string, SlimMon>;
 }
@@ -94,10 +137,17 @@ export interface GmTablePc {
 export interface GmDice {
     count: number;
     sides: number;
+    /** The combatant whose Accuracy, Evasion or Clash is set up, and the
+        move an Accuracy is for: rolling it fills a pip (src/gm/turns.ts). */
+    prepUse?: { pid: string; op?: 'acc' | 'eva' | 'clash'; move?: string } | null;
     history: unknown[];
     /** Show a pool's successes first and the rest after them. Display only:
         the stored faces keep the order they were rolled in. */
     sortResults?: boolean;
+    /** A roll set up from the move panel and waiting for the Roll button:
+        who, what for, the pain and the target number. The dice count is
+        already in `count`, where the GM can still change it for a modifier. */
+    prep?: Record<string, unknown> | null;
 }
 
 export interface GmNameOpts {
@@ -144,6 +194,10 @@ export interface GmState {
     tableCombat: string | null;
     /** Players' characters in a fight, by table member id. */
     tablePcs: Record<string, GmTablePc>;
+    /** Roster trainers shared with the table, by trainer id. */
+    npcShares: Record<string, GmNpcShare>;
+    /** Wild Pokémon offered to players and not yet answered. */
+    gifts: GmGift[];
     /** legacy single note; migrated into noteSheets */
     notes: string;
     noteSheets: GmNoteSheet[];

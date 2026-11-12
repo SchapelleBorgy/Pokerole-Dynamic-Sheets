@@ -8,6 +8,7 @@ import { useTable } from '../../table/TableContext';
 import { CHANNELS } from '../../table/protocol';
 import { FoldTitle, useFold } from './Fold';
 import type { MemberMusic } from '../../table/music/music';
+import { colorVars } from '../../table/colors';
 
 /** The GM's view of one player's music: in time, catching up, or silent. */
 function syncDot(stat: MemberMusic | undefined, playing: boolean): { cls: string; text: string } | null {
@@ -31,7 +32,7 @@ export function MemberList() {
     const [open, toggle] = useFold('members');
 
     return (
-        <div className="member-list">
+        <div className="member-list" data-tour="members">
             <FoldTitle id="members" open={open} onToggle={toggle} icon="fa-users"
                 extra={<span className="count">{members.length}</span>}>
                 At the table
@@ -41,8 +42,11 @@ export function MemberList() {
 
             {open && <ul>
                 {members.map((m) => (
-                    <li key={m.id} className={m.id === myId ? 'me' : ''}>
+                    <li key={m.id} className={m.id === myId ? 'me' : ''} style={colorVars(m.color) as React.CSSProperties}>
                         <span className="who">
+                            <span className="member-avatar" aria-hidden="true">
+                                {(m.name.trim()[0] || '?').toUpperCase()}
+                            </span>
                             {m.host && (
                                 <i className="fa-solid fa-crown host-mark" title="Game Master — rolls the dice"></i>
                             )}
@@ -71,7 +75,8 @@ export function MemberList() {
             {open && isHost && members.length > 1 && (
                 <p className="muted">
                     Removing someone disconnects them, but the password is what really
-                    guards the table — change it by starting a new lobby.
+                    guards the table: Change password in the Invite box keeps them out
+                    for good, and everyone still here follows by themselves.
                 </p>
             )}
         </div>

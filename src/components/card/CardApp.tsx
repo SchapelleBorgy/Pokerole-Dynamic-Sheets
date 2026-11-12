@@ -20,12 +20,17 @@ import {
 } from './ConfirmModals';
 import { CloseWildModal, WildNav, WildSwitcherModal } from './WildSwitcher';
 import { WildActions } from './WildActions';
+import { HomebrewHub } from './HomebrewHub';
 import {
     buildEvolvedSheet, forwardEvolutions, isMegaForm, megaEvolutions, megaRevertTargetId,
 } from '../../card/evolution';
 import type { EvolutionTarget } from '../../card/evolution';
+import { megaEvolveSheet, megaRevertSheet } from '../../card/mega';
+import { activeMegaRules } from '../../lib/megaRules';
+import type { CardSheet } from '../../card/types';
 import { readWorking, trainerMonEntry } from '../../card/persistence';
 import { cardStorageKey, WORKING_KEY } from '../../card/cardContext';
+import { npcReadOnly } from '../../state/npcMode';
 import {
     addWildOpen, forgetWildFileHandle, newWildId, readWildOpen, wildUrl, writeWildOpen,
 } from '../../card/wild';
@@ -33,6 +38,8 @@ import { wildSheetKey } from '../../card/cardContext';
 import { readSpriteFile, spriteUploadDir } from '../../card/customSprite';
 import type { CardMove } from '../../card/moves';
 import { HomeButton } from '../common/HomeButton';
+import { GuidedTour, TourButton, useFirstTimeTour } from '../common/Tour';
+import { CARD_STEPS, CARD_TOUR_INTRO } from './tourSteps';
 import { showAlert } from '../../lib/dialog';
 
 /* The whole Pokémon card.
@@ -47,8 +54,16 @@ export function CardApp() {
     const { data } = useAppData();
     const ctx = store.ctx;
 
-    /* Paint the theme before the browser shows a frame. */
-    useLayoutEffect(() => { applyCardTheme(pokemon, sheet); }, [pokemon, sheet.themeType, sheet.pageTheme]);
+    /* Paint the theme before the browser shows a frame. The empty landing has
+       no Pokémon of its own (Misdreavus only fills the page under it), so it
+       wears the Dark License like the GM screen and the table. */
+    useLayoutEffect(() => {
+        applyCardTheme(pokemon, ctx.isBlank ? { ...sheet, pageTheme: 'License' } : sheet);
+    }, [pokemon, sheet.themeType, sheet.pageTheme, ctx.isBlank]);
+
+    /* Offered once a Pokémon is on the card: the empty landing has nothing
+       to show yet (and the question waits for it to go anyway). */
+    useFirstTimeTour('card', !ctx.isBlank);
 
     const [notesTall, setNotesTall] = useState(false);
     const [typeEffOpen, setTypeEffOpen] = useState(false);
@@ -65,6 +80,7 @@ export function CardApp() {
     const [megaPending, setMegaPending] = useState<{ id: string; into: boolean } | null>(null);
     const [wildSwitcherOpen, setWildSwitcherOpen] = useState(false);
     const [closingWild, setClosingWild] = useState<string | null>(null);
+    const [homebrewOpen, setHomebrewOpen] = useState(false);
 
     const spriteInput = useRef<HTMLInputElement>(null);
     const wildJsonInput = useRef<HTMLInputElement>(null);
@@ -107,13 +123,44 @@ export function CardApp() {
         location.search = '?' + p.toString();
     }, [ctx]);
 
-    /** Persist the rebased sheet to the target species, then load it. */
-    const transformInto = useCallback((targetId: string, opts: { mega?: boolean } = {}) => {
+    /* Another tab writing this sheet — the rolling table's character panel,
+       the GM screen's stats popup or HP bar — shows here at once: on the
+       browser's storage event, on focus, and on a light poll for the case of
+       a card left open on a second monitor. A slot that changed species
+       there reopens the card on it. */
+    useEffect(() => {
+        const sync = () => {
+            const moved = store.syncFromStorage();
+            if (moved) gotoPokemon(moved);
+        };
+        const onStorage = (e: StorageEvent) => { if (e.storageArea === localStorage) sync(); };
+        window.addEventListener('storage', onStorage);
+        window.addEventListener('focus', sync);
+        const poll = window.setInterval(sync, 1000);
+        return () => {
+            window.removeEventListener('storage', onStorage);
+            window.removeEventListener('focus', sync);
+            clearInterval(poll);
+        };
+    }, [store, gotoPokemon]);
+
+    /** Persist the rebased sheet to the target species, then load it. A Mega
+        Evolution and its revert follow the rules in force (src/card/mega.ts). */
+    const transformInto = useCallback((targetId: string, opts: { mega?: boolean; revert?: boolean; ownMoves?: boolean } = {}) => {
         const targetDex = data.pokemon.find((p) => p._id === targetId);
-        if (!targetDex) return;
-        const adjusted = buildEvolvedSheet(src, targetDex);
-        /* A normal evolve or a revert clears mega state. */
-        adjusted.megaFrom = opts.mega === true ? pokemon._id : '';
+        if (!targetDex || npcReadOnly()) return;
+        let adjusted: CardSheet;
+        if (opts.mega) {
+            const r = megaEvolveSheet(src, targetDex, activeMegaRules(), !!opts.ownMoves);
+            if ('error' in r) { void showAlert(r.error); return; }
+            adjusted = r.sheet;
+        } else if (opts.revert) {
+            adjusted = megaRevertSheet(src, targetDex, activeMegaRules());
+        } else {
+            adjusted = buildEvolvedSheet(src, targetDex);
+            /* A normal evolve clears mega state. */
+            adjusted.megaFrom = '';
+        }
 
         if (ctx.inTrainerMode) {
             const w = readWorking();
@@ -273,6 +320,7 @@ export function CardApp() {
 
     /* Each tool button once, so the two orders below cannot drift apart. */
     const toolHome = <HomeButton key="home" className="type-eff-btn" />;
+    const toolTour = <TourButton key="tour" id="card" className="type-eff-btn" />;
 
     const toolTypeEff = (
         <button key="type" className="type-eff-btn" onClick={() => setTypeEffOpen(true)} title="Type Effectiveness">
@@ -300,6 +348,18 @@ export function CardApp() {
             title="Heal: full HP and Will, every status cleared"
         >
             <i className="fa-solid fa-heart-circle-plus"></i>
+        </button>
+    );
+
+    const toolHomebrew = (
+        <button
+            key="homebrew"
+            className="type-eff-btn"
+            id="homebrew-tool"
+            onClick={() => setHomebrewOpen(true)}
+            title="Homebrew Pokémon: make a species of your own, or customise this one"
+        >
+            <i className="fa-solid fa-flask"></i>
         </button>
     );
 
@@ -338,11 +398,11 @@ export function CardApp() {
        are five or six and stay a single centred row. */
     const tools = ctx.wildMode ? (
         <>
-            <div className="tool-row">{toolHome}{toolWildSheets}{toolLoad}{toolHeal}</div>
-            <div className="tool-row">{toolTypeEff}{toolAilments}{toolWeather}</div>
+            <div className="tool-row">{toolHome}{toolTour}{toolWildSheets}{toolLoad}{toolHeal}</div>
+            <div className="tool-row">{toolTypeEff}{toolAilments}{toolWeather}{toolHomebrew}</div>
         </>
     ) : (
-        <>{toolHome}{toolTypeEff}{toolAilments}{toolWeather}{toolHeal}{toolLoad}</>
+        <>{toolHome}{toolTour}{toolTypeEff}{toolAilments}{toolWeather}{toolHeal}{toolHomebrew}{toolLoad}</>
     );
 
     return (
@@ -520,7 +580,10 @@ export function CardApp() {
             <MegaConfirmModal
                 pending={megaPending}
                 onCancel={() => setMegaPending(null)}
-                onConfirm={(id, into) => { setMegaPending(null); transformInto(id, { mega: into }); }}
+                onConfirm={(id, into, ownMoves) => {
+                    setMegaPending(null);
+                    transformInto(id, into ? { mega: true, ownMoves } : { revert: true });
+                }}
             />
 
             <WildSwitcherModal
@@ -537,10 +600,23 @@ export function CardApp() {
                 onConfirm={(wid) => { void closeWild(wid); }}
             />
 
+            <HomebrewHub
+                open={homebrewOpen}
+                current={ctx.isBlank ? null : pokemon}
+                inTrainer={ctx.inTrainerMode}
+                openAfterCreate={ctx.isBlank}
+                onClose={() => setHomebrewOpen(false)}
+                onOpen={(id) => { setHomebrewOpen(false); pickPokemon(id); }}
+                onUse={(id) => { setHomebrewOpen(false); transformInto(id, {}); }}
+            />
+
+            <GuidedTour id="card" steps={CARD_STEPS} intro={CARD_TOUR_INTRO} />
+
             {ctx.isBlank && (
                 <BlankLanding
                     onLoad={() => setPicker({ wild: false })}
                     onWild={() => setPicker({ wild: true })}
+                    onHomebrew={() => setHomebrewOpen(true)}
                 />
             )}
         </>

@@ -365,6 +365,12 @@
 
 /* The eraser's two modes, and the edge look a brush lays down. */
 .map-erase-mode { margin-bottom: 0.55rem; }
+.map-paint-layer { margin-bottom: 0.55rem; }
+/* The filler brush's "Rub out" chip: an eraser on a plain ground. */
+.map-swatch-chip.map-filler-none {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-faint); color: inherit; font-size: 0.75rem;
+}
 .map-edge-choice { margin-top: 0.55rem; }
 .map-edge-dot {
     display: inline-block;
@@ -404,14 +410,22 @@
 .map-type-toggles .map-segmented { flex: 1 1 auto; }
 .map-type-toggles .map-segmented button { font-size: 0.78rem; padding: 0.32rem 0.2rem; }
 
-.map-color-field input[type="color"] {
-    height: 1.9rem;
+/* A colour swatch that opens the page's own picker (ColorField.tsx). */
+.map-swatch {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 1.9rem;
+    height: 1.5rem;
     padding: 2px;
-    border-radius: 8px;
     border: 1px solid var(--border-color);
+    border-radius: 6px;
     background: var(--panel-solid);
     cursor: pointer;
 }
+.map-swatch:hover, .map-swatch[aria-expanded="true"] { border-color: var(--accent); }
+.map-swatch-fill { flex: 1 1 auto; align-self: stretch; border-radius: 4px; box-shadow: inset 0 0 0 1px #0005; }
+.map-swatch.wide { width: 100%; height: 1.9rem; border-radius: 8px; }
+.map-field-row > .map-swatch { flex: 0 0 2.6rem; height: auto; align-self: stretch; }
 
 .map-bend { margin-bottom: 0.55rem; }
 
@@ -480,7 +494,177 @@
     color: #fff;
     text-shadow: 0 0 2px #000;
 }
+.map-swatch.map-color-custom {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid #0008;
+    background: conic-gradient(#e0302c, #f6d32d, #2fa84f, #1e88e5, #7c4dff, #ec4899, #e0302c);
+}
 .map-color-custom.on { outline: 2px solid var(--accent); outline-offset: 1px; }
-.map-color-custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; }
 .map-sketch-panel .map-check { margin-top: 0.5rem; }
 .map-sketch-clear { margin-top: 0.6rem; width: 100%; }
+
+/* The Shapes tool */
+.map-shapes { margin-bottom: 0.9rem; }
+.map-shapes.in-sketch { margin: 0.6rem 0 0.7rem; }
+.map-sketch-mode { margin-top: 0.5rem; }
+.map-shape-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+}
+.map-shape-choice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.45rem 0.2rem 0.35rem;
+    font-size: 0.7rem;
+    line-height: 1.15;
+    min-width: 0;
+}
+.map-shape-choice svg { color: var(--text-secondary); }
+.map-shape-choice[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-faint);
+    box-shadow: 0 0 6px var(--accent-glow);
+}
+.map-shape-choice[aria-pressed="true"] svg { color: var(--accent); }
+
+/* The Alt tip: a small bubble under the shapes, pointing up at them, that
+   comes back each time a shape is picked. Its ground is OPAQUE (the faint
+   accent laid over the panel's own colour): with a see-through ground the
+   arrow, which overlaps the bubble's top edge, showed through as a darker
+   patch. The arrow is a square turned 45°, bordered on its two upper sides,
+   centred on the bubble's top border so its corners land on that line. */
+.map-shape-tip {
+    --tip-ground: linear-gradient(var(--accent-faint), var(--accent-faint)), var(--panel-solid);
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin-top: 0.7rem;
+    padding: 0.4rem 1.6rem 0.4rem 0.5rem;
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    background: var(--tip-ground);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    animation: map-shape-tip-in 0.22s ease-out;
+}
+.map-shape-tip::before {
+    content: '';
+    position: absolute;
+    /* 10px box: its centre 0.5px above the padding edge, the middle of
+       the 1px top border. */
+    top: -5.5px;
+    left: 1.1rem;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    transform: rotate(45deg);
+    border-left: 1px solid var(--accent);
+    border-top: 1px solid var(--accent);
+    border-top-left-radius: 2px;
+    background: var(--tip-ground);
+}
+.map-shape-tip kbd {
+    flex: 0 0 auto;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.68rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--accent);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+}
+.map-shape-tip-close {
+    position: absolute;
+    top: 0.2rem;
+    right: 0.2rem;
+    padding: 0.1rem 0.3rem;
+    border: 0;
+    background: none;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+@keyframes map-shape-tip-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .map-shape-tip { animation: none; } }
+.map-shape-fill { margin-top: 0.55rem; }
+.map-shape-width-field { width: 4.6rem; flex: 0 0 auto; font-size: 0.8rem; }
+
+/* Single fillers: their own markers as tiles, and a row to pick one by. */
+.map-filler-art { image-rendering: auto; }
+/* On the terrain's own ground, so dark ink reads on the dark panel. */
+.map-tile-art.map-filler-art { padding: 5px; border-radius: 7px; box-sizing: border-box; }
+.map-filler-art.pixelated, .map-filler-variant img.pixelated { image-rendering: pixelated; }
+.map-filler-variants {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.25rem;
+}
+.map-filler-variant {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    padding: 3px;
+    min-width: 0;
+}
+.map-filler-variant img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.map-filler-variant[aria-pressed="true"] {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    box-shadow: 0 0 6px var(--accent-glow);
+}
+
+/* A landmark's own map (World Builder): open it, or make one. */
+.map-inside {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-top: 0.4rem;
+    padding: 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    background: #ffffff08;
+}
+.map-inside-title { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
+.map-inside-title > i { color: var(--text-muted); margin-right: 0.25rem; }
+.map-inside-create { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.map-inside-create > button, .map-inside-open { flex: 1 1 auto; }
+.map-inside .map-hint { margin: 0; }
+
+/* The Build tool's catalogue and a placed thing's colours. */
+.map-build-thumb { object-fit: contain; }
+.map-placed-colors { display: flex; flex-wrap: wrap; gap: 0.35rem 0.6rem; align-items: center; }
+.map-placed-color { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: var(--text-secondary); }
+
+
+/* The Build palette: the thing picked, its variants, the Modern/Medieval filter. */
+.map-build-era { margin-bottom: 8px; }
+.map-build-current {
+    display: flex; flex-direction: column; gap: 6px; padding: 8px; margin-bottom: 8px;
+    border: 1px solid var(--border-color); border-radius: 10px; background: var(--panel-solid);
+}
+.map-build-current-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.map-build-current-head > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.map-build-current-art { width: 44px; height: 44px; object-fit: contain; flex: none; }
+.map-variants { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.map-variant {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; min-width: 0;
+    border: 1px solid var(--border-color); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit;
+}
+.map-variant img { width: 40px; height: 40px; object-fit: contain; }
+.map-variant span { font-size: 0.7rem; line-height: 1.15; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-variant.on { border-color: var(--accent); background: var(--accent-faint); }
+.map-tile { position: relative; }
+.map-tile-count {
+    position: absolute; top: 3px; right: 3px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+    font-size: 0.62rem; line-height: 15px; text-align: center; background: var(--accent); color: #fff;
+}

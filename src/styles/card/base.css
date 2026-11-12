@@ -3,30 +3,32 @@
        block from the loaded Pokémon's typing. --ghost-color is the
        primary (Type1) color, --accent the secondary (Type2, or a
        lighter Type1 tint for single-type Pokémon). The defaults
-       below are the original Ghost purple. */
-    --bg-color: #0b0713;
-    --bg-top: #1e1233;
-    --card-bg: #191124b2;
-    --panel-strong: #191124f2;
-    --panel-medium: #191124e6;
-    --panel-soft: #191124cc;
-    --panel-solid: #191124;
-    --primary-faint: #a855f70d;
-    --border-color: #a855f740;
-    --border-glow: #a855f726;
-    --primary-soft: #a855f733;
-    --ghost-color: #a855f7;
-    --ghost-color-glow: #a855f766;
-    --text-primary: #f3e8ff;
-    --text-secondary: #c084fc;
-    --text-muted: #a21caf;
-    --accent: #22d3ee;
-    --accent-glow: #22d3ee4c;
-    --accent-faint: #22d3ee26;
-    --accent-soft: #22d3ee14;
-    --accent-border: #22d3ee40;
-    --trained-color: #22d3ee;
-    --trained-glow: #22d3ee4c;
+       below are the Dark License (CUSTOM_THEMES.License), the theme every
+       page wears when nothing else is chosen; they were the original
+       Ghost purple. */
+    --bg-color: #161514;
+    --bg-top: #231d1e;
+    --card-bg: #2b2928b0;
+    --panel-strong: #302e2df7;
+    --panel-medium: #302e2dec;
+    --panel-soft: #302e2dd9;
+    --panel-solid: #302e2d;
+    --primary-faint: #c8383b10;
+    --border-color: #c8383b3a;
+    --border-glow: #c8383b1e;
+    --primary-soft: #c8383b33;
+    --ghost-color: #c8383b;
+    --ghost-color-glow: #c8383b59;
+    --text-primary: #f4efef;
+    --text-secondary: #c8b4b4;
+    --text-muted: #8a7c7c;
+    --accent: #e0645c;
+    --accent-glow: #e0645c4c;
+    --accent-faint: #e0645c26;
+    --accent-soft: #e0645c14;
+    --accent-border: #e0645c40;
+    --trained-color: #e0645c;
+    --trained-glow: #e0645c4c;
 
     --phys-color: #f97316;
     --spec-color: #3b82f6;

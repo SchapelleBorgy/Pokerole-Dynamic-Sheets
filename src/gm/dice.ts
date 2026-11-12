@@ -3,6 +3,8 @@
    Pokerole pools are d6 where 4-6 is a success, so d6 rolls also report
    successes; other dice just show faces and total. */
 
+import { CRIT_MARGIN } from './constants';
+
 export interface RollEntry {
     label: string;
     vals: number[];
@@ -23,6 +25,10 @@ export interface RollEntry {
     bonus?: number | null;
     pain?: number;
     verdict?: string;
+    /** The successes over `need` that make a critical, when not the usual
+        three: 2 for a High Critical move, less with a crit offset, 0 for a
+        move that always crits. Absent on rolls made before it existed. */
+    crit?: number;
     /** Carried so a hit can roll the damage in one more click. `what` names
         the damage roll; older entries without it fall back to the accuracy's. */
     dmg?: { token: string; mi: number; dice: number; what?: string } | null;
@@ -46,15 +52,30 @@ export const VERDICTS: Record<string, { label: string; cls: string; icon: string
     fumble: { label: 'Critical failure', cls: 'fumble', icon: 'fa-skull' },
 };
 
-export function accuracyVerdict(succ: number, need: number, critMargin: number): string {
-    if (succ >= need + critMargin) return 'crit';
-    if (succ <= need - critMargin) return 'fumble';
+/** `critMargin` is the move's (see `critMargin` in lib/combatMods); the
+    critical failure stays at `fumbleMargin`, three, whatever the move. */
+export function accuracyVerdict(succ: number, need: number, critMargin: number, fumbleMargin = CRIT_MARGIN): string {
+    if (succ >= need + critMargin && succ >= need) return 'crit';
+    if (succ <= need - fumbleMargin) return 'fumble';
     return succ >= need ? 'hit' : 'miss';
+}
+
+/** One die, from the browser's cryptographic generator rather than
+    Math.random, whose stream can be predicted from enough of its output. The
+    top of the 32-bit range that does not divide evenly is thrown back, so no
+    face comes up more often than another. Low numbers make low faces, as
+    Math.random's did, so a harness can still force a roll. */
+function face(sides: number): number {
+    const n = Math.max(1, Math.floor(sides));
+    const limit = 0x100000000 - (0x100000000 % n);
+    const buf = new Uint32Array(1);
+    do crypto.getRandomValues(buf); while (buf[0] >= limit);
+    return 1 + Math.floor(buf[0] / (limit / n));
 }
 
 /** Roll `count` dice of `sides`, and work out what it means. */
 export function roll(count: number, sides: number, meta: RollMeta, critMargin: number): RollEntry {
-    const vals = Array.from({ length: count }, () => 1 + Math.floor(Math.random() * sides));
+    const vals = Array.from({ length: count }, () => face(sides));
     return scoreRoll(vals, sides, meta, critMargin);
 }
 
@@ -84,7 +105,7 @@ export function scoreRoll(vals: number[], sides: number, meta: RollMeta, critMar
     /* An Accuracy roll made against a target number carries its verdict with it,
        so the history still reads as a hit or a miss later. */
     if (entry.need != null && succ != null) {
-        entry.verdict = accuracyVerdict(entry.net!, entry.need, critMargin);
+        entry.verdict = accuracyVerdict(entry.net!, entry.need, entry.crit ?? critMargin, critMargin);
     }
     return entry;
 }
